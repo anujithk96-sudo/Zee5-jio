@@ -3,7 +3,6 @@ import os
 import time
 import asyncio
 import yt_dlp
-import cv2
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from pyrogram import Client, filters
@@ -49,19 +48,6 @@ def get_video_duration(file_path):
     except Exception:
         pass
     return 0
-
-# Function to generate automatic thumbnail
-def generate_thumbnail(video_path):
-    try:
-        cap = cv2.VideoCapture(video_path)
-        success, image = cap.read()
-        thumb_path = "downloads/thumb.jpg"
-        if success:
-            cv2.imwrite(thumb_path, image)
-            return thumb_path
-    except Exception:
-        pass
-    return None
 
 # Progress bar helper
 def get_progress_bar(percentage):
@@ -267,10 +253,9 @@ async def download_media(client, callback_query: CallbackQuery):
             file_name = os.path.basename(filename)
             duration = get_video_duration(filename)
             
+            # കസ്റ്റം തംബ്‌നെയിൽ മാത്രം ഉപയോഗിക്കുന്നു (OpenCV ഒഴിവാക്കി)
             if user_id in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[user_id]):
                 thumb_path = USER_THUMBNAILS[user_id]
-            else:
-                thumb_path = generate_thumbnail(filename)
 
             await client.send_video(
                 chat_id=callback_query.message.chat.id,
@@ -285,13 +270,9 @@ async def download_media(client, callback_query: CallbackQuery):
         
         if os.path.exists(filename):
             os.remove(filename)
-        if thumb_path and thumb_path.startswith("downloads/") and os.path.exists(thumb_path):
-            os.remove(thumb_path)
 
     except Exception as e:
         await status_msg.edit_text(f"❌ Download failed: {str(e)}")
-        if thumb_path and thumb_path.startswith("downloads/") and os.path.exists(thumb_path):
-            os.remove(thumb_path)
 
 if __name__ == "__main__":
     print("Bot is running...")
