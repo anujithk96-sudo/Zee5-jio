@@ -15,6 +15,9 @@ API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
+# വലിയ URL-കൾ സേവ് ചെയ്തു വെക്കാനുള്ള ഡിക്ഷണറി
+USER_URLS = {}
+
 # ഇവന്റ് ലൂപ്പ് സെറ്റ് ചെയ്യുന്നു
 try:
     loop = asyncio.get_event_loop()
@@ -44,10 +47,10 @@ def get_progress_hook(client, message):
                 try:
                     asyncio.run_coroutine_threadsafe(
                         message.edit_text(
-                            f"📥 ഡൗൺലോഡ് പുരോഗമിക്കുന്നു...\n\n"
-                            f"📊 ശതമാനം: {percentage}\n"
-                            f"🚀 വേഗത: {speed}\n"
-                            f"⏱️ ബാക്കി സമയം: {eta}"
+                            f"📥 Downloading...\n\n"
+                            f"📊 Percentage: {percentage}\n"
+                            f"🚀 Speed: {speed}\n"
+                            f"⏱️ ETA: {eta}"
                         ),
                         client.loop
                     )
@@ -56,34 +59,35 @@ def get_progress_hook(client, message):
                 last_update_time = current_time
     return progress_hook
 
-# /start കമാൻഡ്
+# /start കമാൻഡ് (ഇംഗ്ലീഷിലുള്ള വെൽക്കം മെസ്സേജ്)
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     await message.reply_text(
-        "👋 സ്വാഗതം!\n\n"
-        "ഞാൻ ഒരു Media Downloader Bot ആണ്. "
-        "നിങ്ങൾക്ക് ആവശ്യമുള്ള ജിയോ ഹോസ്റ്റാർ ലിങ്ക് ഇവിടെ അയച്ചു തന്നാൽ, MP3 ഓഡിയോ ആയോ വീഡിയോ ആയോ ഡൗൺലോഡ് ചെയ്ത് തരുന്നതാണ്."
+        "👋 Hello! Welcome to JioHotstar Downloader Bot.\n\n"
+        "Send any JioHotstar link, and you can download it as MP3 Audio or Video!"
     )
 
-# ലിങ്ക് പരിശോധിക്കുന്ന ഹാൻഡ്‌ലർ (Hotstar അല്ലെങ്കിൽ പൊതുവായ ലിങ്കുകൾ തിരിച്ചറിയാൻ)
+# https ലിങ്കുകൾ ഉൾപ്പെടെയുള്ള ഹോസ്റ്റാർ ലിങ്കുകൾ ഓട്ടോമാറ്റിക്കായി തിരിച്ചറിയുന്ന ഹാൻഡ്‌ലർ
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
 async def get_link(client, message):
     url = message.text.strip()
+    user_id = message.from_user.id
 
-    # ഏത് ഹോസ്റ്റാർ / ഒടിടി ലിങ്ക് ആണെങ്കിലും പെട്ടെന്ന് തിരിച്ചറിയാൻ
-    if "hotstar.com" in url or "jiocinema" in url or "http" in url:
+    # ലിങ്കിൽ hotstar.com ഉണ്ടോ എന്ന് പരിശോധിക്കുന്നു
+    if "hotstar.com" in url:
+        USER_URLS[user_id] = url
         keyboard = InlineKeyboardMarkup([
             [
-                InlineKeyboardButton("🎵 Extract MP3 Audio (Recommended)", callback_data=f"dl|audio|mp3|{url}")
+                InlineKeyboardButton("🎵 Extract MP3 Audio (Recommended)", callback_data="dl|audio|mp3")
             ],
             [
-                InlineKeyboardButton("📹 720p Video", callback_data=f"dl|video|720|{url}"),
-                InlineKeyboardButton("📹 480p Video", callback_data=f"dl|video|480|{url}")
+                InlineKeyboardButton("📹 720p Video", callback_data="dl|video|720"),
+                InlineKeyboardButton("📹 480p Video", callback_data="dl|video|480")
             ]
         ])
-        await message.reply_text("📥 ആവശ്യമായ ഫോർമാറ്റ് തിരഞ്ഞെടുക്കുക:", reply_markup=keyboard)
+        await message.reply_text("📥 JioHotstar link detected! Please select your required format:", reply_markup=keyboard)
     else:
-        await message.reply_text("ദയവായി ശരിയായ ജിയോ ഹോസ്റ്റാർ ലിങ്ക് അയക്കുക.")
+        await message.reply_text("❌ Please send a valid JioHotstar link.")
 
 # ഡൗൺലോഡ് പ്രോസസ്സ് ഹാൻഡ്‌ലർ
 @app.on_callback_query(filters.regex("^dl\|"))
@@ -91,10 +95,16 @@ async def download_media(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
     media_type = data_parts[1] # video അല്ലെങ്കിൽ audio
     quality = data_parts[2]
-    url = data_parts[3]
+    
+    user_id = callback_query.from_user.id
+    url = USER_URLS.get(user_id)
+
+    if not url:
+        await callback_query.message.edit_text("❌ Link expired. Please send the link again.")
+        return
 
     if media_type == "audio":
-        status_msg = await callback_query.message.edit_text("🎵 MP3 ഓഡിയോ എക്സ്ട്രാക്റ്റ് ചെയ്യുന്നു... ദയവായി കാത്തിരിക്കുക...")
+        status_msg = await callback_query.message.edit_text("🎵 Extracting MP3 audio... Please wait...")
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': 'downloads/%(title)s.%(ext)s',
@@ -106,7 +116,7 @@ async def download_media(client, callback_query: CallbackQuery):
             'progress_hooks': [get_progress_hook(client, status_msg)],
         }
     else:
-        status_msg = await callback_query.message.edit_text(f" തിരഞ്ഞെടുക്കപ്പെട്ട ക്വാളിറ്റി: {quality}p. ഡൗൺലോഡ് ആരംഭിക്കുന്നു...")
+        status_msg = await callback_query.message.edit_text(f"📥 Downloading {quality}p video... Please wait...")
         ydl_opts = {
             'format': f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
             'outtmpl': 'downloads/%(title)s.%(ext)s',
@@ -126,19 +136,19 @@ async def download_media(client, callback_query: CallbackQuery):
             if media_type == "audio":
                 filename = os.path.splitext(filename)[0] + ".mp3"
 
-        await status_msg.edit_text(" ഫയൽ അപ്‌ലോഡ് ചെയ്യുന്നു...")
+        await status_msg.edit_text("📤 Uploading to Telegram...")
 
         if media_type == "audio":
             await client.send_audio(
                 chat_id=callback_query.message.chat.id,
                 audio=filename,
-                caption="🎵 ഇവിടെ നിങ്ങളുടെ MP3 ഓഡിയോ!"
+                caption="🎵 Here is your JioHotstar MP3 Audio!"
             )
         else:
             await client.send_video(
                 chat_id=callback_query.message.chat.id,
                 video=filename,
-                caption=f"📹 ഇവിടെ നിങ്ങളുടെ വീഡിയോ ({quality}p)!"
+                caption=f"📹 Here is your JioHotstar Video ({quality}p)!"
             )
 
         await status_msg.delete()
@@ -148,8 +158,8 @@ async def download_media(client, callback_query: CallbackQuery):
             os.remove(filename)
 
     except Exception as e:
-        await status_msg.edit_text(f"❌ ഡൗൺലോഡ് ചെയ്യുന്നതിൽ പരാജയപ്പെട്ടു: {str(e)}")
+        await status_msg.edit_text(f"❌ Download failed: {str(e)}")
 
 if __name__ == "__main__":
-    print("ബോട്ട് റൺ ആകുന്നു...")
+    print("Bot is running...")
     app.run()
