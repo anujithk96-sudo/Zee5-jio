@@ -8,28 +8,28 @@ from hachoir.parser import createParser
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
-# Logging setup
+# ലോഗിങ് സെറ്റ് ചെയ്യുക
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-# Environment variables
+# എൻവയോൺമെന്റ് വേരിയബിളുകൾ
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# Dictionaries for storing user data
+# വലിയ URL-കളും യൂസർ ഡാറ്റകളും സേവ് ചെയ്തു വെക്കാനുള്ള ഡിക്ഷണറികൾ
 USER_URLS = {}
 USER_THUMBNAILS = {}
 USER_STATES = {}
 
-# Event loop setup
+# ഇവന്റ് ലൂപ്പ് സെറ്റ് ചെയ്യുന്നു
 try:
     loop = asyncio.get_event_loop()
 except RuntimeError:
     loop = asyncio.new_event_loop()
 asyncio.set_event_loop(loop)
 
-# Pyrogram Client initialization
+# Pyrogram ക്라이언트 initialization
 app = Client(
     "jiohotstar_bot",
     api_id=API_ID,
@@ -37,7 +37,7 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# Function to get video duration
+# വീഡിയോയുടെ ഡ്യൂറേഷൻ (Duration) കണ്ടുപിടിക്കാൻ
 def get_video_duration(file_path):
     try:
         parser = createParser(file_path)
@@ -49,7 +49,7 @@ def get_video_duration(file_path):
         pass
     return 0
 
-# Progress bar helper
+# പ്രോഗ്രസ് ബാർ (ബ്ലാക്ക് ബോക്സ് രീതിയിൽ നിറയുന്നത്) ഉണ്ടാക്കാൻ
 def get_progress_bar(percentage):
     try:
         pct = float(percentage.replace('%', '').strip())
@@ -59,6 +59,7 @@ def get_progress_bar(percentage):
     remaining = 10 - completed
     return "█" * completed + "░" * remaining
 
+# ലൈവ് പ്രോഗ്രസ് ബാർ ഹുക്ക് (ഡൗൺലോഡ് & അപ്‌ലോഡ് സമയത്ത് കാണിക്കാൻ)
 def get_progress_hook(client, message, title="Downloading"):
     last_update_time = 0
     def progress_hook(d):
@@ -85,7 +86,7 @@ def get_progress_hook(client, message, title="Downloading"):
                 last_update_time = current_time
     return progress_hook
 
-# User settings keyboard markup
+# യൂസർ സെറ്റിംഗ്സ് കീബോർഡ് (തംബ്‌നെയിൽ മാനേജ്‌മെന്റ് ഓപ്ഷനുകൾ)
 def build_user_settings_keyboard(user_id):
     has_thumb = "Yes ✅" if user_id in USER_THUMBNAILS else "No ❌"
     return InlineKeyboardMarkup([
@@ -94,7 +95,7 @@ def build_user_settings_keyboard(user_id):
         [InlineKeyboardButton("🗑️ Remove Thumbnail", callback_data="remove_thumb")]
     ])
 
-# /start command handler
+# /start കമാൻഡ്
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     await message.reply_text(
@@ -103,7 +104,7 @@ async def start_command(client, message):
         reply_markup=build_user_settings_keyboard(message.from_user.id)
     )
 
-# /settings command handler
+# /settings കമാൻഡ് (തംബ്‌നെയിൽ സെറ്റപ്പുകൾക്കായി)
 @app.on_message(filters.command("settings") & filters.private)
 async def settings_command(client, message):
     await message.reply_text(
@@ -111,7 +112,7 @@ async def settings_command(client, message):
         reply_markup=build_user_settings_keyboard(message.from_user.id)
     )
 
-# Settings callback query handler
+# സെറ്റിംഗ്സ് ബട്ടൺ കോൾബാക്കുകൾ
 @app.on_callback_query(filters.regex("^(set_thumb|view_thumb|remove_thumb)$"))
 async def settings_callback(client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
@@ -136,7 +137,7 @@ async def settings_callback(client, callback_query: CallbackQuery):
         await callback_query.message.edit_reply_markup(reply_markup=build_user_settings_keyboard(user_id))
     await callback_query.answer()
 
-# Input message handler for links and photos
+# ഫോട്ടോയോ ലിങ്കോ ഇൻപുട്ട് എടുക്കുന്ന ഹാൻഡ്‌ലർ
 @app.on_message(filters.private & ~filters.command(["start", "settings"]))
 async def handle_user_inputs(client, message):
     user_id = message.from_user.id
@@ -183,11 +184,11 @@ async def handle_user_inputs(client, message):
         if not state:
             await message.reply_text("❌ Please send a valid JioHotstar link with `-n custom_name` or use `/settings`.")
 
-# Download process callback handler
+# ഡൗൺലോഡ് പ്രോസസ്സ് ഹാൻഡ്‌ലർ
 @app.on_callback_query(filters.regex("^dl\|"))
 async def download_media(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
-    media_type = data_parts[1] 
+    media_type = data_parts[1] # video അല്ലെങ്കിൽ audio
     quality = data_parts[2]
     
     user_id = callback_query.from_user.id
@@ -220,6 +221,7 @@ async def download_media(client, callback_query: CallbackQuery):
             'progress_hooks': [get_progress_hook(client, status_msg, f"Downloading {quality}p Video")],
         }
 
+    # cookies.txt ഫയൽ ഉണ്ടെങ്കിൽ ഉപയോഗിക്കുന്നു
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = "cookies.txt"
 
@@ -233,6 +235,7 @@ async def download_media(client, callback_query: CallbackQuery):
             if media_type == "audio":
                 filename = os.path.splitext(filename)[0] + ".mp3"
 
+        # -n വഴി നൽകിയ കസ്റ്റം പേര് അനുസരിച്ച് ഫയൽ റീനെയിം ചെയ്യൽ
         dir_name, orig_filename = os.path.split(filename)
         name_part, ext = os.path.splitext(orig_filename)
         
@@ -253,7 +256,7 @@ async def download_media(client, callback_query: CallbackQuery):
             file_name = os.path.basename(filename)
             duration = get_video_duration(filename)
             
-            # കസ്റ്റം തംബ്‌നെയിൽ മാത്രം ഉപയോഗിക്കുന്നു (OpenCV ഒഴിവാക്കി)
+            # യൂസർ സെറ്റ് ചെയ്ത തംബ്‌നെയിൽ ഉണ്ടെങ്കിൽ അത് എടുക്കുന്നു
             if user_id in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[user_id]):
                 thumb_path = USER_THUMBNAILS[user_id]
 
@@ -268,6 +271,7 @@ async def download_media(client, callback_query: CallbackQuery):
 
         await status_msg.delete()
         
+        # ഫയൽ ക്ലീനപ്പ്
         if os.path.exists(filename):
             os.remove(filename)
 
