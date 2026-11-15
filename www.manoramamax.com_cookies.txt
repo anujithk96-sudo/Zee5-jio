@@ -1,0 +1,25 @@
+# Netscape HTTP Cookie File
+# https://curl.haxx.se/rfc/cookie_spec.html
+# This is a generated file! Do not edit.
+
+.manoramamax.com	TRUE	/	FALSE	1802543201	_gcl_au	1.1.1174329031.1794767201
+www.manoramamax.com	FALSE	/	FALSE	1795631201	_boxId_v3	%22b92354e9-de31-33af-fc78-58bc247f298c%22
+www.manoramamax.com	FALSE	/	FALSE	1795631201	_sessionId_v3	%22c5db3d4d-619a-46c6-b6e5-2ac67bcaffb2%22
+.manoramamax.com	TRUE	/	FALSE	1794769102	l_sid	cb96e5ef-ff5a-45e4-b620-f3ac0d6bbc7b
+.manoramamax.com	TRUE	/	FALSE	1829327289	l_sidx	1
+.manoramamax.com	TRUE	/	FALSE	1829327289	l_aid	44b8a309-3c72-4cf9-9cc7-1fde65eb5c8b
+.manoramamax.com	TRUE	/	TRUE	1828463300	_scor_uid	b9273412e35041648b0f6d69876a89b1
+.manoramamax.com	TRUE	/	FALSE	1829327290	_ga	GA1.1.538968205.1794767202
+.manoramamax.com	TRUE	/	FALSE	1818095202	_pubcid	f99ff35c-6633-4511-b41e-fde8ce3070dc
+.manoramamax.com	TRUE	/	TRUE	1828463203	__gads	ID=013d55284deffe60:T=1794767203:RT=1794767203:S=ALNI_MZH9tsAPVGoiZD4MuoeV4TjRyfYSg
+.manoramamax.com	TRUE	/	TRUE	1828463203	__gpi	UID=000015e1255fcdde:T=1794767203:RT=1794767203:S=ALNI_MYWx8gYMAn3B4qWXkmzNY9oRghXqw
+.manoramamax.com	TRUE	/	TRUE	1810319203	__eoi	ID=5b555299f0816fd0:T=1794767203:RT=1794767203:S=AA-AfjaztfR5k3MiX2_zTlBFCkuG
+.manoramamax.com	TRUE	/	FALSE	1818095203	_cc_id	97d10bdcea616895117b692db536baef
+.manoramamax.com	TRUE	/	FALSE	1794853604	panoramaId_expiry	1794853603472
+www.manoramamax.com	FALSE	/	FALSE	1797359290	l_did	616c84e6-a91a-57e1-b4b9-843d1ea069631423393552
+.manoramamax.com	TRUE	/	FALSE	1828463290	FCCDCF	%5Bnull%2Cnull%2Cnull%2Cnull%2Cnull%2Cnull%2C%5B%5B32%2C%22%5B%5C%2291589d95-65e0-4cca-a6d6-70b7cd958ca7%5C%22%2C%5B1794767202%2C552000000%5D%5D%22%5D%5D%5D
+.manoramamax.com	TRUE	/	TRUE	1829327291	moe_uuid	9702ec0c-1b3f-4c1f-bf49-996195b54cac
+.manoramamax.com	TRUE	/	FALSE	1826303291	FCNEC	%5B%5B%22AKsRol8dMeWiupkBA97A2lOhbu-5oLVVs9sQy99pNI90DNOqouQIenln0owLmI9ZwUXVzhUONkgFG0YwmCdMFPaJQ7r4lP_GKw%3D%3D%22%5D%5D
+www.manoramamax.com	FALSE	/	FALSE	1795631293	_user-info_v3	%7B%22hasUserProfiles%22%3Atrue%2C%22isLoggedIn%22%3Atrue%2C%22expiryTime%22%3A1794788893310%7D
+www.manoramamax.com	FALSE	/	FALSE	1794787199	_firstVisit_v3	true
+.manoramamax.com	TRUE	/	FALSE	1829327301	_ga_D9073PF6T9	GS2.1.s1794767201$o1$g1$t1794767301$j60$l0$h0
