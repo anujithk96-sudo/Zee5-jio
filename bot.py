@@ -27,7 +27,6 @@ API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
 ALLOWED_IDS = set(map(int, os.getenv("ALLOWED_USER_IDS", "").split(","))) if os.getenv("ALLOWED_USER_IDS") else set()
 
-# വലിയ URL-കളും യൂസർ ഡാറ്റകളും ടാസ്കുകളും സേവ് ചെയ്തു വെക്കാനുള്ള ഡിക്ഷണറികൾ
 USER_URLS = {}
 USER_THUMBNAILS = {}
 USER_STATES = {}
@@ -42,11 +41,9 @@ PLATFORMS = {
 ALL_PLATFORMS = [p for group in PLATFORMS.values() for p in group]
 QUALITIES = ["4K", "1080p", "720p", "480p"]
 
-# Auth guard
 def is_allowed(user_id: int) -> bool:
     return not ALLOWED_IDS or user_id in ALLOWED_IDS
 
-# വീഡിയോയുടെ ഡ്യൂറേഷൻ (Duration) കണ്ടുപിടിക്കാൻ
 def get_video_duration(file_path):
     try:
         parser = createParser(file_path)
@@ -58,7 +55,6 @@ def get_video_duration(file_path):
         pass
     return 0
 
-# ഒറിജിനൽ തംബ്‌നെയിൽ ലിങ്കിൽ നിന്ന് ഡൗൺലോഡ് ചെയ്ത് ലോക്കൽ ഫയലാക്കാൻ
 def download_youtube_thumbnail(thumbnail_url, user_id):
     os.makedirs("thumbnails", exist_ok=True)
     thumb_path = f"thumbnails/yt_{user_id}.jpg"
@@ -86,7 +82,6 @@ def download_youtube_thumbnail(thumbnail_url, user_id):
         logger.error(f"Error downloading thumbnail: {e}")
     return None
 
-# ഒറിജിനൽ തംബ്‌നെയിൽ കിട്ടിയില്ലെങ്കിൽ വീഡിയോയിൽ നിന്ന് 5-ാം സെക്കൻഡിൽ ഫോട്ടോ എടുക്കാൻ
 def generate_thumbnail(video_path, user_id):
     os.makedirs("thumbnails", exist_ok=True)
     thumb_path = f"thumbnails/auto_{user_id}.jpg"
@@ -102,7 +97,6 @@ def generate_thumbnail(video_path, user_id):
         logger.error(f"Error generating thumbnail: {e}")
     return None
 
-# പ്രോഗ്രസ് ബാർ ഉണ്ടാക്കാൻ
 def get_progress_bar(percentage):
     try:
         pct = float(percentage.replace('%', '').strip())
@@ -112,7 +106,6 @@ def get_progress_bar(percentage):
     remaining = 10 - completed
     return "█" * completed + "░" * remaining
 
-# ലൈവ് പ്രോഗ്രസ് ബാർ ഹുക്ക്
 def get_progress_hook(client, message, user_id, title="Downloading"):
     last_update_time = 0
     def progress_hook(d):
@@ -145,7 +138,6 @@ def get_progress_hook(client, message, user_id, title="Downloading"):
                 last_update_time = current_time
     return progress_hook
 
-# Pyrogram ക്라이언트 initialization
 app = Client(
     "jiohotstar_bot",
     api_id=int(API_ID) if API_ID and API_ID.isdigit() else 0,
@@ -153,7 +145,6 @@ app = Client(
     bot_token=BOT_TOKEN
 )
 
-# ── /start ──────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("start") & filters.private)
 async def start(client, message):
     if not is_allowed(message.from_user.id):
@@ -161,53 +152,50 @@ async def start(client, message):
         return
 
     text = (
-        "🎬 *OTT Downloader Bot*\n\n"
+        "🎬 OTT Downloader Bot\n\n"
         "Download from JioHotstar & other OTT platforms directly via Telegram.\n\n"
-        "*Quick commands:*\n"
-        "`/rip <platform> <url>` — Start a download\n"
-        "`/status` — View active downloads\n"
-        "`/platforms` — List all supported platforms\n"
-        "`/help` — Full help"
+        "Quick commands:\n"
+        "/rip <platform> <url> — Start a download\n"
+        "/status — View active downloads\n"
+        "/platforms — List all supported platforms\n"
+        "/help — Full help"
     )
-    await message.reply_text(text, parse_mode="markdown")
+    await message.reply_text(text)
 
-# ── /help ───────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("help") & filters.private)
 async def help_cmd(client, message):
     if not is_allowed(message.from_user.id):
         return
 
     text = (
-        "📖 *Full Command Reference*\n\n"
-        "*Download:*\n"
-        "`/rip <platform> <url> [quality]`\n"
+        "📖 Full Command Reference\n\n"
+        "Download:\n"
+        "/rip <platform> <url> [quality]\n"
         "  platform → hotstar, jiocinema, netflix, etc.\n"
         "  quality  → 4K, 1080p, 720p, 480p\n\n"
-        "*Other commands:*\n"
-        "`/status` — Active downloads\n"
-        "`/cancel <job_id>` — Cancel a download\n"
-        "`/platforms` — All supported platforms"
+        "Other commands:\n"
+        "/status — Active downloads\n"
+        "/cancel <job_id> — Cancel a download\n"
+        "/platforms — All supported platforms"
     )
-    await message.reply_text(text, parse_mode="markdown")
+    await message.reply_text(text)
 
-# ── /platforms ──────────────────────────────────────────────────────────────
 @app.on_message(filters.command("platforms") & filters.private)
 async def platforms_cmd(client, message):
     if not is_allowed(message.from_user.id):
         return
 
     text = (
-        "📡 *Supported Platforms*\n\n"
-        "🌍 *Global*\n"
-        f"`{'` · `'.join(PLATFORMS['global'])}`\n\n"
-        "🇮🇳 *Indian*\n"
-        f"`{'` · `'.join(PLATFORMS['indian'])}`\n\n"
-        "🗺️ *Regional*\n"
-        f"`{'` · `'.join(PLATFORMS['regional'])}`"
+        "📡 Supported Platforms\n\n"
+        "🌍 Global\n"
+        f"{' · '.join(PLATFORMS['global'])}\n\n"
+        "🇮🇳 Indian\n"
+        f"{' · '.join(PLATFORMS['indian'])}\n\n"
+        "🗺️ Regional\n"
+        f"{' · '.join(PLATFORMS['regional'])}"
     )
-    await message.reply_text(text, parse_mode="markdown")
+    await message.reply_text(text)
 
-# ── /rip ────────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("rip") & filters.private)
 async def rip_cmd(client, message):
     if not is_allowed(message.from_user.id):
@@ -217,9 +205,8 @@ async def rip_cmd(client, message):
     args = message.command[1:]
     if len(args) < 2:
         await message.reply_text(
-            "❌ *Usage:* `/rip <platform> <url> [quality]`\n\n"
-            "Example: `/rip hotstar https://... 1080p`",
-            parse_mode="markdown"
+            "❌ Usage: /rip <platform> <url> [quality]\n\n"
+            "Example: /rip hotstar https://... 1080p"
         )
         return
 
@@ -229,8 +216,7 @@ async def rip_cmd(client, message):
 
     if platform not in ALL_PLATFORMS:
         await message.reply_text(
-            f"❌ Unknown platform `{platform}`.\nUse /platforms to see all supported ones.",
-            parse_mode="markdown"
+            f"❌ Unknown platform {platform}.\nUse /platforms to see all supported ones."
         )
         return
 
@@ -238,12 +224,11 @@ async def rip_cmd(client, message):
     started  = datetime.now().strftime("%H:%M:%S")
 
     status_msg = await message.reply_text(
-        f"⬇️ *Download started!*\n\n"
-        f"🆔 Job ID: `{job_id}`\n"
-        f"📡 Platform: `{platform}`\n"
-        f"🎯 Quality: `{quality}`\n"
-        f"🕐 Started: `{started}`",
-        parse_mode="markdown"
+        f"⬇️ Download started!\n\n"
+        f"🆔 Job ID: {job_id}\n"
+        f"📡 Platform: {platform}\n"
+        f"🎯 Quality: {quality}\n"
+        f"🕐 Started: {started}"
     )
     asyncio.create_task(run_rip_download(job_id, platform, url, quality, status_msg, message.from_user.id))
 
@@ -261,16 +246,16 @@ async def run_rip_download(job_id, platform, url, quality, status_msg, user_id):
         stdout, stderr = await proc.communicate()
 
         if user_id in CANCEL_REQUESTS:
-            await status_msg.edit_text("❌ **Task Cancelled successfully!**")
+            await status_msg.edit_text("❌ Task Cancelled successfully!")
             return
 
         if proc.returncode == 0:
-            await status_msg.edit_text(f"✅ *Download complete!*\n🆔 Job `{job_id}` finished successfully.", parse_mode="markdown")
+            await status_msg.edit_text(f"✅ Download complete!\n🆔 Job {job_id} finished successfully.")
         else:
             err = stderr.decode()[-300:] if stderr else "Unknown error"
-            await status_msg.edit_text(f"❌ *Download failed!*\n🆔 Job `{job_id}`\n\nError:\n`{err}`", parse_mode="markdown")
+            await status_msg.edit_text(f"❌ Download failed!\n🆔 Job {job_id}\n\nError:\n{err}")
     except Exception as e:
-        await status_msg.edit_text(f"💥 *Unexpected error* in job `{job_id}`:\n`{str(e)}`", parse_mode="markdown")
+        await status_msg.edit_text(f"💥 Unexpected error in job {job_id}:\n{str(e)}")
 
 def _platform_folder(platform: str) -> str:
     if platform in PLATFORMS["global"]:   return "global"
@@ -278,23 +263,21 @@ def _platform_folder(platform: str) -> str:
     if platform in PLATFORMS["regional"]: return "regional"
     return "global"
 
-# ── /status ──────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("status") & filters.private)
 async def status_cmd(client, message):
     if not is_allowed(message.from_user.id):
         return
 
     if not active_downloads:
-        await message.reply_text("📭 No active downloads right now.", parse_mode="markdown")
+        await message.reply_text("📭 No active downloads right now.")
         return
 
-    lines = ["📊 *Active Downloads Status*\n"]
+    lines = ["📊 Active Downloads Status\n"]
     for jid in list(active_downloads.keys())[-10:]:
-        lines.append(f"⬇️ Job ID: `{jid}` — Running")
+        lines.append(f"⬇️ Job ID: {jid} — Running")
 
-    await message.reply_text("\n".join(lines), parse_mode="markdown")
+    await message.reply_text("\n".join(lines))
 
-# ── /cancel ───────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("cancel") & filters.private)
 async def cancel_cmd(client, message):
     if not is_allowed(message.from_user.id):
@@ -302,20 +285,19 @@ async def cancel_cmd(client, message):
 
     args = message.command[1:]
     if not args:
-        await message.reply_text("Usage: `/cancel <job_id>`", parse_mode="markdown")
+        await message.reply_text("Usage: /cancel <job_id>")
         return
 
     job_id = args[0]
     if job_id not in active_downloads:
-        await message.reply_text(f"❌ Job `{job_id}` not found.", parse_mode="markdown")
+        await message.reply_text(f"❌ Job {job_id} not found.")
         return
 
     info = active_downloads[job_id]
     if info.get("process"):
         info["process"].terminate()
-    await message.reply_text(f"🚫 Job `{job_id}` cancelled.", parse_mode="markdown")
+    await message.reply_text(f"🚫 Job {job_id} cancelled.")
 
-# Task cancel callback handler
 @app.on_callback_query(filters.regex("^cancel_dl_"))
 async def cancel_task_callback(client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
@@ -326,7 +308,6 @@ async def cancel_task_callback(client, callback_query: CallbackQuery):
     else:
         await callback_query.answer("❌ You are not authorized to cancel this task!", show_alert=True)
 
-# ── Direct Link Handler (Hotstar / JioCinema / etc.) ─────────────────────────
 @app.on_message(filters.private & ~filters.command(["start", "help", "platforms", "rip", "status", "cancel"]))
 async def handle_user_inputs(client, message):
     user_id = message.from_user.id
@@ -344,7 +325,7 @@ async def handle_user_inputs(client, message):
 
         USER_URLS[user_id] = {"url": url, "custom_name": custom_name}
         
-        status_msg = await message.reply_text("⏳ **Fetching video info & original thumbnail... Please wait!**")
+        status_msg = await message.reply_text("⏳ Fetching video info & original thumbnail... Please wait!")
 
         cookie_file_path = "cookies.txt" if os.path.exists("cookies.txt") else None
 
@@ -406,12 +387,11 @@ async def handle_user_inputs(client, message):
 
         except Exception as e:
             logging.exception("Info extraction error: %s", e)
-            await status_msg.edit_text(f"❌ Could not fetch video info.\n\n<b>Reason:</b> <code>{html.escape(str(e)[:500])}</code>", parse_mode="html")
+            await status_msg.edit_text(f"❌ Could not fetch video info.\n\nReason: <code>{html.escape(str(e)[:500])}</code>", parse_mode="html")
     else:
-        await message.reply_text("❌ Please send a valid OTT link or use `/rip` command.")
+        await message.reply_text("❌ Please send a valid OTT link or use /rip command.")
 
-# വേഗത്തിൽ ഓഡിയോ ലാംഗ്വേജ് ലിസ്റ്റ് ലോഡ് ചെയ്യാൻ ഒപ്റ്റിമൈസ് ചെയ്ത ഹാൻഡ്‌ലർ
-@app.on_callback_query(filters.regex("^dl\\|video\\|"))
+@app.on_callback_query(filters.regex(r"^dl\\|video\\|"))
 async def select_audio_languages(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
     quality = data_parts[2]
@@ -444,8 +424,7 @@ async def select_audio_languages(client, callback_query: CallbackQuery):
     )
     await callback_query.answer("Select audio language(s):")
 
-# അന്തിമമായി ഡൗൺലോഡ് ചെയ്ത് അപ്‌ലോഡ് ചെയ്യുന്ന ഹാൻഡ്‌ലർ
-@app.on_callback_query(filters.regex("^dl_final\\|"))
+@app.on_callback_query(filters.regex(r"^dl_final\\|"))
 async def download_final_media(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
     quality = data_parts[1]
@@ -472,7 +451,7 @@ async def download_final_media(client, callback_query: CallbackQuery):
 
     status_msg = await client.send_message(
         chat_id=callback_query.message.chat.id,
-        text=f"⏳ Initializing download for `{quality}p` (Audio: {selected_audio.upper()})... Please wait.",
+        text=f"⏳ Initializing download for {quality}p (Audio: {selected_audio.upper()})... Please wait.",
         reply_markup=cancel_keyboard
     )
 
@@ -518,51 +497,4 @@ async def download_final_media(client, callback_query: CallbackQuery):
                 os.rename(filename, new_filename)
                 filename = new_filename
 
-        await status_msg.edit_text("📤 Uploading to Telegram...", reply_markup=cancel_keyboard)
-
-        if user_id in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[user_id]):
-            thumb_path = USER_THUMBNAILS[user_id]
-        elif f"yt_{user_id}" in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[f"yt_{user_id}"]):
-            thumb_path = USER_THUMBNAILS[f"yt_{user_id}"]
-            
-        if not thumb_path or not os.path.exists(thumb_path):
-            thumb_path = generate_thumbnail(filename, user_id)
-
-        file_name = os.path.basename(filename)
-        duration = get_video_duration(filename)
-
-        await client.send_video(
-            chat_id=callback_query.message.chat.id,
-            video=filename,
-            file_name=file_name,
-            duration=duration,
-            thumb=thumb_path,
-            caption=f"📹 Here is your OTT Video ({quality}p - Audio: {selected_audio.upper()})"
-        )
-
-        await status_msg.delete()
-        
-        if filename and os.path.exists(filename):
-            os.remove(filename)
-        if thumb_path and "thumbnails/auto_" in thumb_path and os.path.exists(thumb_path):
-            os.remove(thumb_path)
-        if f"yt_{user_id}" in USER_THUMBNAILS:
-            try:
-                os.remove(USER_THUMBNAILS[f"yt_{user_id}"])
-                del USER_THUMBNAILS[f"yt_{user_id}"]
-            except:
-                pass
-
-    except Exception as e:
-        if user_id in CANCEL_REQUESTS or "cancelled" in str(e).lower():
-            await status_msg.edit_text("❌ **Task Cancelled successfully!**")
-        else:
-            await status_msg.edit_text(f"❌ Download failed: {str(e)}")
-        if filename and os.path.exists(filename):
-            os.remove(filename)
-    finally:
-        CANCEL_REQUESTS.discard(user_id)
-
-if __name__ == "__main__":
-    print("🤖 OTT Bot is running... Press Ctrl+C to stop.")
-    app.run()
+        await status_msg.edit
