@@ -2,7 +2,11 @@ import logging
 import os
 import time
 import asyncio
+import re
 import yt_dlp
+import shutil
+import html
+import subprocess
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from pyrogram import Client, filters
@@ -17,10 +21,12 @@ API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# വലിയ URL-കളും യൂസർ ഡാറ്റകളും സേവ് ചെയ്തു വെക്കാനുള്ള ഡിക്ഷണറികൾ
+# വലിയ URL-കളും യൂസർ ഡാറ്റകളും ടാസ്കുകളും സേവ് ചെയ്തു വെക്കാനുള്ള ഡിക്ഷണറികൾ
 USER_URLS = {}
 USER_THUMBNAILS = {}
 USER_STATES = {}
+ACTIVE_TASKS = {}
+CANCEL_REQUESTS = set()
 
 # ഇവന്റ് ലൂപ്പ് സെറ്റ് ചെയ്യുന്നു
 try:
@@ -49,6 +55,50 @@ def get_video_duration(file_path):
         pass
     return 0
 
+# ഒറിജിനൽ തംബ്‌നെയിൽ ലിങ്കിൽ നിന്ന് ഡൗൺലോഡ് ചെയ്ത് ലോക്കൽ ഫയലാക്കാൻ
+def download_youtube_thumbnail(thumbnail_url, user_id):
+    os.makedirs("thumbnails", exist_ok=True)
+    thumb_path = f"thumbnails/yt_{user_id}.jpg"
+    try:
+        import requests
+        response = requests.get(thumbnail_url, timeout=10)
+        if response.status_code == 200:
+            with open(thumb_path, "wb") as f:
+                f.write(response.content)
+            if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+                converted_thumb = f"thumbnails/thumb_{user_id}.jpg"
+                result = subprocess.run(
+                    ["ffmpeg", "-y", "-i", thumb_path, "-vf",
+                     "scale=320:320:force_original_aspect_ratio=decrease",
+                     "-q:v", "5", converted_thumb],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+                if os.path.exists(thumb_path):
+                    os.remove(thumb_path)
+                if result.returncode == 0 and os.path.exists(converted_thumb):
+                    return converted_thumb
+                elif os.path.exists(thumb_path):
+                    return thumb_path
+    except Exception as e:
+        logger.error(f"Error downloading YouTube/Hotstar thumbnail: {e}")
+    return None
+
+# ഒറിജിനൽ തംബ്‌നെയിൽ കിട്ടിയില്ലെങ്കിൽ വീഡിയോയിൽ നിന്ന് 5-ാം സെക്കൻഡിൽ ഫോട്ടോ എടുക്കാൻ
+def generate_thumbnail(video_path, user_id):
+    os.makedirs("thumbnails", exist_ok=True)
+    thumb_path = f"thumbnails/auto_{user_id}.jpg"
+    try:
+        cmd = [
+            "ffmpeg", "-ss", "00:00:05", "-i", video_path,
+            "-vframes", "1", "-q:v", "2", thumb_path, "-y"
+        ]
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+            return thumb_path
+    except Exception as e:
+        logger.error(f"Error generating thumbnail: {e}")
+    return None
+
 # പ്രോഗ്രസ് ബാർ (ബ്ലാക്ക് ബോക്സ് രീതിയിൽ നിറയുന്നത്) ഉണ്ടാക്കാൻ
 def get_progress_bar(percentage):
     try:
@@ -60,10 +110,12 @@ def get_progress_bar(percentage):
     return "█" * completed + "░" * remaining
 
 # ലൈവ് പ്രോഗ്രസ് ബാർ ഹുക്ക് (ഡൗൺലോഡ് & അപ്‌ലോഡ് സമയത്ത് കാണിക്കാൻ)
-def get_progress_hook(client, message, title="Downloading"):
+def get_progress_hook(client, message, user_id, title="Downloading"):
     last_update_time = 0
     def progress_hook(d):
         nonlocal last_update_time
+        if user_id in CANCEL_REQUESTS:
+            raise Exception("Task cancelled by user.")
         if d['status'] == 'downloading':
             current_time = time.time()
             if current_time - last_update_time > 3:
@@ -71,13 +123,17 @@ def get_progress_hook(client, message, title="Downloading"):
                 speed = d.get('_speed_str', 'N/A').strip()
                 eta = d.get('_eta_str', 'N/A').strip()
                 bar = get_progress_bar(percentage)
+                cancel_keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("✖️ Cancel Task", callback_data=f"cancel_dl_{user_id}")]
+                ])
                 try:
                     asyncio.run_coroutine_threadsafe(
                         message.edit_text(
                             f"📥 {title}...\n\n"
                             f"[{bar}] {percentage}\n"
                             f"🚀 Speed: {speed}\n"
-                            f"⏱️ ETA: {eta}"
+                            f"⏱️ ETA: {eta}",
+                            reply_markup=cancel_keyboard
                         ),
                         client.loop
                     )
@@ -100,7 +156,7 @@ def build_user_settings_keyboard(user_id):
 async def start_command(client, message):
     await message.reply_text(
         "👋 Hello! Welcome to JioHotstar Downloader Bot.\n\n"
-        "Send any JioHotstar link with `-n custom_name` for renaming, and download as Audio or Video!",
+        "Send any JioHotstar link with `-n custom_name` for renaming, and download with Multi-Audio support!",
         reply_markup=build_user_settings_keyboard(message.from_user.id)
     )
 
@@ -137,6 +193,17 @@ async def settings_callback(client, callback_query: CallbackQuery):
         await callback_query.message.edit_reply_markup(reply_markup=build_user_settings_keyboard(user_id))
     await callback_query.answer()
 
+# ടാസ്ക് കാൻസൽ ചെയ്യാനുള്ള കോൾബാക്ക് ഹാൻഡ്‌ലർ
+@app.on_callback_query(filters.regex("^cancel_dl_"))
+async def cancel_task_callback(client, callback_query: CallbackQuery):
+    user_id = callback_query.from_user.id
+    target_user_id = int(callback_query.data.split("_")[2])
+    if user_id == target_user_id:
+        CANCEL_REQUESTS.add(target_user_id)
+        await callback_query.answer("⚠️ Task cancellation requested...", show_alert=True)
+    else:
+        await callback_query.answer("❌ You are not authorized to cancel this task!", show_alert=True)
+
 # ഫോട്ടോയോ ലിങ്കോ ഇൻപുട്ട് എടുക്കുന്ന ഹാൻഡ്‌ലർ
 @app.on_message(filters.private & ~filters.command(["start", "settings"]))
 async def handle_user_inputs(client, message):
@@ -153,43 +220,171 @@ async def handle_user_inputs(client, message):
         return
 
     text = message.text.strip() if message.text else ""
-    if "hotstar.com" in text:
+    
+    # ഫുൾ യുആർഎൽ കൃത്യമായി എക്സ്ട്രാക്ട് ചെയ്യാൻ റെഗുലർ എക്സ്പ്രഷൻ ഉപയോഗിക്കുന്നു
+    url_match = re.search(r'https?://[^\s]+', text)
+    extracted_url = url_match.group(0) if url_match else text
+
+    if "hotstar.com" in extracted_url or "jiocinema.com" in extracted_url or "jiohotstar.com" in extracted_url:
         parts = text.split("-n")
-        url = parts[0].strip()
+        url = url_match.group(0) if url_match else parts[0].strip()
         custom_name = parts[1].strip() if len(parts) > 1 else None
 
         USER_URLS[user_id] = {"url": url, "custom_name": custom_name}
         
-        # എല്ലാ ക്വാളിറ്റികളും MP3 ഓപ്ഷനും ഉൾപ്പെടുത്തിയ കീബോർഡ്
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎵 Extract MP3 Audio", callback_data="dl|audio|mp3")],
-            [
-                InlineKeyboardButton("📹 144p", callback_data="dl|video|144"),
-                InlineKeyboardButton("📹 240p", callback_data="dl|video|240")
-            ],
-            [
-                InlineKeyboardButton("📹 360p", callback_data="dl|video|360"),
-                InlineKeyboardButton("📹 480p", callback_data="dl|video|480")
-            ],
-            [
-                InlineKeyboardButton("📹 576p", callback_data="dl|video|576"),
-                InlineKeyboardButton("📹 720p", callback_data="dl|video|720")
-            ],
-            [
-                InlineKeyboardButton("📹 1080p", callback_data="dl|video|1080")
-            ]
-        ])
-        await message.reply_text("📥 JioHotstar link detected! Please select your required format:", reply_markup=keyboard)
+        status_msg = await message.reply_text(
+            "⏳ **Fetching JioHotstar video info & original thumbnail... Please wait!**"
+        )
+
+        cookie_file_path = "cookies.txt" if os.path.exists("cookies.txt") else None
+
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+                'noplaylist': True,
+                'cookiefile': cookie_file_path,
+                'nocheckcertificate': True
+            }
+
+            def extract_info_fast():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+
+            info = await asyncio.to_thread(extract_info_fast)
+            title = info.get('title', 'JioHotstar Video')
+            thumbnail_url = info.get('thumbnail')
+            if not thumbnail_url and 'thumbnails' in info:
+                thumbnails = info.get('thumbnails', [])
+                if thumbnails:
+                    thumbnail_url = thumbnails[-1].get('url')
+
+            # ഒറിജിനൽ തംബ്‌നെയിൽ മുൻകൂട്ടി ഡൗൺലോഡ് ചെയ്ത് സേവ് ചെയ്തു വെക്കുന്നു
+            yt_thumb_path = None
+            if thumbnail_url:
+                yt_thumb_path = await asyncio.to_thread(download_youtube_thumbnail, thumbnail_url, user_id)
+            if yt_thumb_path:
+                USER_THUMBNAILS[f"yt_{user_id}"] = yt_thumb_path
+
+            # 144p ഒഴിവാക്കി ബാക്കി ക്വാളിറ്റി ബട്ടണുകൾ മാത്രം നൽകിയിരിക്കുന്നു
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎵 Extract MP3 Audio", callback_data="dl|audio|mp3|all")],
+                [
+                    InlineKeyboardButton("📹 240p", callback_data="dl|video|240"),
+                    InlineKeyboardButton("📹 360p", callback_data="dl|video|360")
+                ],
+                [
+                    InlineKeyboardButton("📹 480p", callback_data="dl|video|480"),
+                    InlineKeyboardButton("📹 576p", callback_data="dl|video|576")
+                ],
+                [
+                    InlineKeyboardButton("📹 720p", callback_data="dl|video|720"),
+                    InlineKeyboardButton("📹 1080p", callback_data="dl|video|1080")
+                ]
+            ])
+
+            caption_text = (
+                f"🎬 <b>{title}</b>\n\n"
+                "👇 <b>Select your preferred quality:</b>"
+            )
+
+            if thumbnail_url:
+                try:
+                    await message.reply_photo(
+                        photo=thumbnail_url,
+                        caption=caption_text,
+                        reply_markup=keyboard
+                    )
+                    await status_msg.delete()
+                    return
+                except Exception:
+                    pass
+
+            await status_msg.edit_text(
+                caption_text,
+                reply_markup=keyboard
+            )
+
+        except Exception as e:
+            logging.exception("JioHotstar info extraction error: %s", e)
+            await status_msg.edit_text(
+                "❌ Could not fetch JioHotstar video info.\n\n"
+                f"<b>Reason:</b> <code>{html.escape(str(e)[:500])}</code>",
+                parse_mode="html",
+            )
     else:
         if not state:
             await message.reply_text("❌ Please send a valid JioHotstar link with `-n custom_name` or use `/settings`.")
 
-# ഡൗൺലോഡ് പ്രോസസ്സ് ഹാൻഡ്‌ലർ
-@app.on_callback_query(filters.regex("^dl\|"))
-async def download_media(client, callback_query: CallbackQuery):
+# ക്വാളിറ്റി ബട്ടൺ ക്ലിക്ക് ചെയ്യുമ്പോൾ ഓഡിയോ ലാംഗ്വേജ് ഓപ്ഷനുകൾ കാണിക്കുക
+@app.on_callback_query(filters.regex("^dl\|video\|"))
+async def select_audio_languages(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
-    media_type = data_parts[1] # video അല്ലെങ്കിൽ audio
     quality = data_parts[2]
+    
+    user_id = callback_query.from_user.id
+    user_data = USER_URLS.get(user_id)
+
+    if not user_data:
+        await callback_query.message.edit_text("❌ Link expired. Please send the link again.")
+        return
+
+    url = user_data["url"]
+    cookie_file_path = "cookies.txt" if os.path.exists("cookies.txt") else None
+    
+    ydl_opts = {
+        'quiet': True,
+        'no_warnings': True,
+        'skip_download': True,
+        'cookiefile': cookie_file_path,
+        'nocheckcertificate': True
+    }
+
+    detected_langs = []
+    try:
+        def get_formats():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                return ydl.extract_info(url, download=False)
+        
+        info = await asyncio.to_thread(get_formats)
+        formats = info.get('formats', [])
+        
+        for f in formats:
+            lang = f.get('language') or f.get('language_preference')
+            if lang and str(lang) not in detected_langs:
+                detected_langs.append(str(lang))
+    except Exception:
+        pass
+
+    if not detected_langs:
+        detected_langs = ["mal", "tam", "hin", "eng"]
+
+    audio_buttons = []
+    for lang in detected_langs:
+        lang_name = lang.upper()
+        audio_buttons.append([
+            InlineKeyboardButton(f"🔊 {lang_name} Audio", callback_data=f"dl_final|{quality}|{lang}")
+        ])
+    
+    audio_buttons.append([
+        InlineKeyboardButton("🌐 Download All Audio (Multi-Audio)", callback_data=f"dl_final|{quality}|all")
+    ])
+    audio_buttons.append([
+        InlineKeyboardButton("🔙 Back to Quality", callback_data="back_to_quality")
+    ])
+
+    await callback_query.message.edit_reply_markup(
+        reply_markup=InlineKeyboardMarkup(audio_buttons)
+    )
+    await callback_query.answer("Select audio language(s):")
+
+# അന്തിമമായി ഡൗൺലോഡ് ചെയ്ത് അപ്‌ലോഡ് ചെയ്യുന്ന ഹാൻഡ്‌ലർ
+@app.on_callback_query(filters.regex("^dl_final\|"))
+async def download_final_media(client, callback_query: CallbackQuery):
+    data_parts = callback_query.data.split("|")
+    quality = data_parts[1]
+    selected_audio = data_parts[2]
     
     user_id = callback_query.from_user.id
     user_data = USER_URLS.get(user_id)
@@ -201,82 +396,106 @@ async def download_media(client, callback_query: CallbackQuery):
     url = user_data["url"]
     custom_name = user_data["custom_name"]
 
-    if media_type == "audio":
-        status_msg = await callback_query.message.edit_text("🎵 Extracting MP3 audio... Please wait...")
-        ydl_opts = {
-            'format': 'bestaudio/best',
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'postprocessors': [{
-                'key': 'FFmpegExtractAudio',
-                'preferredcodec': 'mp3',
-                'preferredquality': '192',
-            }],
-            'progress_hooks': [get_progress_hook(client, status_msg, "Downloading Audio")],
-        }
-    else:
-        status_msg = await callback_query.message.edit_text(f"📥 Downloading {quality}p video... Please wait...")
-        ydl_opts = {
-            'format': f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
-            'outtmpl': 'downloads/%(title)s.%(ext)s',
-            'progress_hooks': [get_progress_hook(client, status_msg, f"Downloading {quality}p Video")],
-        }
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
 
-    # cookies.txt ഫയൽ ഉണ്ടെങ്കിൽ ഉപയോഗിക്കുന്നു
+    cancel_keyboard = InlineKeyboardMarkup([
+        [InlineKeyboardButton("✖️ Cancel Task", callback_data=f"cancel_dl_{user_id}")]
+    ])
+
+    status_msg = await client.send_message(
+        chat_id=callback_query.message.chat.id,
+        text=f"⏳ Initializing download for `{quality}p` (Audio: {selected_audio.upper()})... Please wait.",
+        reply_markup=cancel_keyboard
+    )
+
+    if selected_audio == "all":
+        format_str = f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best'
+    else:
+        format_str = f'bestvideo[height<={quality}]+bestaudio[language={selected_audio}]/best[height<={quality}]/best'
+
+    ydl_opts = {
+        'format': format_str,
+        'outtmpl': 'downloads/%(title)s.%(ext)s',
+        'progress_hooks': [get_progress_hook(client, status_msg, user_id, f"Downloading {quality}p Video")],
+    }
+
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = "cookies.txt"
 
     thumb_path = None
+    filename = None
     try:
         os.makedirs("downloads", exist_ok=True)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
+        def run_download():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                if user_id in CANCEL_REQUESTS:
+                    raise Exception("Task cancelled by user.")
+                info = ydl.extract_info(url, download=True)
+                return ydl.prepare_filename(info)
+
+        filename = await asyncio.to_thread(run_download)
+
+        if user_id in CANCEL_REQUESTS:
+            raise Exception("Task cancelled by user.")
+
+        if filename and os.path.exists(filename):
+            dir_name, orig_filename = os.path.split(filename)
+            _, ext = os.path.splitext(orig_filename)
             
-            if media_type == "audio":
-                filename = os.path.splitext(filename)[0] + ".mp3"
+            if custom_name:
+                new_filename = os.path.join(dir_name, f"{custom_name}_{selected_audio.upper()}{ext}")
+                if os.path.exists(new_filename):
+                    os.remove(new_filename)
+                os.rename(filename, new_filename)
+                filename = new_filename
 
-        # -n വഴി നൽകിയ കസ്റ്റം പേര് അനുസരിച്ച് ഫയൽ റീനെയിം ചെയ്യൽ
-        dir_name, orig_filename = os.path.split(filename)
-        name_part, ext = os.path.splitext(orig_filename)
-        
-        if custom_name:
-            new_filename = os.path.join(dir_name, f"{custom_name}{ext}")
-            os.rename(filename, new_filename)
-            filename = new_filename
+        await status_msg.edit_text("📤 Uploading to Telegram...", reply_markup=cancel_keyboard)
 
-        await status_msg.edit_text("📤 Uploading to Telegram...")
-
-        if media_type == "audio":
-            await client.send_audio(
-                chat_id=callback_query.message.chat.id,
-                audio=filename,
-                caption="🎵 Here is your JioHotstar MP3 Audio!"
-            )
-        else:
-            file_name = os.path.basename(filename)
-            duration = get_video_duration(filename)
+        if user_id in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[user_id]):
+            thumb_path = USER_THUMBNAILS[user_id]
+        elif f"yt_{user_id}" in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[f"yt_{user_id}"]):
+            thumb_path = USER_THUMBNAILS[f"yt_{user_id}"]
             
-            # യൂസർ സെറ്റ് ചെയ്ത തംബ്‌നെയിൽ ഉണ്ടെങ്കിൽ അത് എടുക്കുന്നു
-            if user_id in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[user_id]):
-                thumb_path = USER_THUMBNAILS[user_id]
+        if not thumb_path or not os.path.exists(thumb_path):
+            thumb_path = generate_thumbnail(filename, user_id)
 
-            await client.send_video(
-                chat_id=callback_query.message.chat.id,
-                video=filename,
-                file_name=file_name,
-                duration=duration,
-                thumb=thumb_path,
-                caption=f"📹 Here is your JioHotstar Video ({quality}p)!"
-            )
+        file_name = os.path.basename(filename)
+        duration = get_video_duration(filename)
+
+        await client.send_video(
+            chat_id=callback_query.message.chat.id,
+            video=filename,
+            file_name=file_name,
+            duration=duration,
+            thumb=thumb_path,
+            caption=f"📹 Here is your JioHotstar Video ({quality}p - Audio: {selected_audio.upper()})"
+        )
 
         await status_msg.delete()
         
-        # ഫയൽ ക്ലീനപ്പ്
-        if os.path.exists(filename):
+        if filename and os.path.exists(filename):
             os.remove(filename)
+        if thumb_path and "thumbnails/auto_" in thumb_path and os.path.exists(thumb_path):
+            os.remove(thumb_path)
+        if f"yt_{user_id}" in USER_THUMBNAILS:
+            try:
+                os.remove(USER_THUMBNAILS[f"yt_{user_id}"])
+                del USER_THUMBNAILS[f"yt_{user_id}"]
+            except:
+                pass
 
     except Exception as e:
-        await status_msg.edit_text(f"❌ Download failed: {str(e)}")
+        if user_id in CANCEL_REQUESTS or "cancelled" in str(e).lower():
+            await status_msg.edit_text("❌ **Task Cancelled successfully!**")
+        else:
+            await status_msg.edit_text(f"❌ Download failed: {str(e)}")
+        if filename and os.path.exists(filename):
+            os.remove(filename)
+    finally:
+        CANCEL_REQUESTS.discard(user_id)
 
 if __name__ == "__main__":
     print("Bot is running...")
