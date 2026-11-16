@@ -1,4 +1,3 @@
-import logging
 import os
 import time
 import asyncio
@@ -7,10 +6,15 @@ import yt_dlp
 import shutil
 import html
 import subprocess
+import uuid
+from datetime import datetime
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
+from dotenv import load_dotenv
+
+load_dotenv()
 
 # ലോഗിങ് സെറ്റ് ചെയ്യുക
 logging.basicConfig(format="%(asctime)s - %(name)s - %(levelname)s - %(message)s", level=logging.INFO)
@@ -19,29 +23,27 @@ logger = logging.getLogger(__name__)
 # എൻവയോൺമെന്റ് വേരിയബിളുകൾ
 API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
-BOT_TOKEN = os.environ.get("BOT_TOKEN")
+BOT_TOKEN = os.environ.get("BOT_TOKEN") or os.getenv("TELEGRAM_BOT_TOKEN")
+ALLOWED_IDS = set(map(int, os.getenv("ALLOWED_USER_IDS", "").split(","))) if os.getenv("ALLOWED_USER_IDS") else set()
 
 # വലിയ URL-കളും യൂസർ ഡാറ്റകളും ടാസ്കുകളും സേവ് ചെയ്തു വെക്കാനുള്ള ഡിക്ഷണറികൾ
 USER_URLS = {}
 USER_THUMBNAILS = {}
 USER_STATES = {}
-ACTIVE_TASKS = {}
+active_downloads = {}
 CANCEL_REQUESTS = set()
 
-# ഇവന്റ് ലൂപ്പ് സെറ്റ് ചെയ്യുന്നു
-try:
-    loop = asyncio.get_event_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
+PLATFORMS = {
+    "global":   ["netflix","prime","disney","hbomax","hulu","apple","peacock","paramount"],
+    "indian":   ["jiocinema","hotstar","sonyliv","zee5","altbalaji","erosnow","manoramamax","hoichoi"],
+    "regional": ["aha","mxplayer","voot","shemaroo","sun_nxt","yupp_tv","stage"],
+}
+ALL_PLATFORMS = [p for group in PLATFORMS.values() for p in group]
+QUALITIES = ["4K", "1080p", "720p", "480p"]
 
-# Pyrogram ക്라이언트 initialization
-app = Client(
-    "jiohotstar_bot",
-    api_id=API_ID,
-    api_hash=API_HASH,
-    bot_token=BOT_TOKEN
-)
+# Auth guard
+def is_allowed(user_id: int) -> bool:
+    return not ALLOWED_IDS or user_id in ALLOWED_IDS
 
 # വീഡിയോയുടെ ഡ്യൂറേഷൻ (Duration) കണ്ടുപിടിക്കാൻ
 def get_video_duration(file_path):
@@ -80,7 +82,7 @@ def download_youtube_thumbnail(thumbnail_url, user_id):
                 elif os.path.exists(thumb_path):
                     return thumb_path
     except Exception as e:
-        logger.error(f"Error downloading YouTube/Hotstar thumbnail: {e}")
+        logger.error(f"Error downloading thumbnail: {e}")
     return None
 
 # ഒറിജിനൽ തംബ്‌നെയിൽ കിട്ടിയില്ലെങ്കിൽ വീഡിയോയിൽ നിന്ന് 5-ാം സെക്കൻഡിൽ ഫോട്ടോ എടുക്കാൻ
@@ -99,7 +101,7 @@ def generate_thumbnail(video_path, user_id):
         logger.error(f"Error generating thumbnail: {e}")
     return None
 
-# പ്രോഗ്രസ് ബാർ (ബ്ലാക്ക് ബോക്സ് രീതിയിൽ നിറയുന്നത്) ഉണ്ടാക്കാൻ
+# പ്രോഗ്രസ് ബാർ ഉണ്ടാക്കാൻ
 def get_progress_bar(percentage):
     try:
         pct = float(percentage.replace('%', '').strip())
@@ -109,7 +111,7 @@ def get_progress_bar(percentage):
     remaining = 10 - completed
     return "█" * completed + "░" * remaining
 
-# ലൈവ് പ്രോഗ്രസ് ബാർ ഹുക്ക് (ഡൗൺലോഡ് & അപ്‌ലോഡ് സമയത്ത് കാണിക്കാൻ)
+# ലൈവ് പ്രോഗ്രസ് ബാർ ഹുക്ക്
 def get_progress_hook(client, message, user_id, title="Downloading"):
     last_update_time = 0
     def progress_hook(d):
@@ -142,58 +144,177 @@ def get_progress_hook(client, message, user_id, title="Downloading"):
                 last_update_time = current_time
     return progress_hook
 
-# യൂസർ സെറ്റിംഗ്സ് കീബോർഡ് (തംബ്‌നെയിൽ മാനേജ്‌മെന്റ് ഓപ്ഷനുകൾ)
-def build_user_settings_keyboard(user_id):
-    has_thumb = "Yes ✅" if user_id in USER_THUMBNAILS else "No ❌"
-    return InlineKeyboardMarkup([
-        [InlineKeyboardButton(f"🖼️ Thumbnail Set: {has_thumb}", callback_data="set_thumb")],
-        [InlineKeyboardButton("👀 View Thumbnail", callback_data="view_thumb")],
-        [InlineKeyboardButton("🗑️ Remove Thumbnail", callback_data="remove_thumb")]
-    ])
+# Pyrogram ക്라이언트 initialization
+app = Client(
+    "jiohotstar_bot",
+    api_id=API_ID,
+    api_hash=API_HASH,
+    bot_token=BOT_TOKEN
+)
 
-# /start കമാൻഡ്
+# ── /start ──────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("start") & filters.private)
-async def start_command(client, message):
-    await message.reply_text(
-        "👋 Hello! Welcome to JioHotstar Downloader Bot.\n\n"
-        "Send any JioHotstar link with `-n custom_name` for renaming, and download with Multi-Audio support!",
-        reply_markup=build_user_settings_keyboard(message.from_user.id)
+async def start(client, message):
+    if not is_allowed(message.from_user.id):
+        await message.reply_text("⛔ You are not authorised to use this bot.")
+        return
+
+    text = (
+        "🎬 *OTT Downloader Bot*\n\n"
+        "Download from 20+ OTT platforms directly via Telegram.\n\n"
+        "*Quick commands:*\n"
+        "`/rip <platform> <url>` — Start a download\n"
+        "`/status` — View active downloads\n"
+        "`/platforms` — List all supported platforms\n"
+        "`/help` — Full help"
     )
+    await message.reply_text(text, parse_mode="Markdown")
 
-# /settings കമാൻഡ് (തംബ്‌നെയിൽ സെറ്റപ്പുകൾക്കായി)
-@app.on_message(filters.command("settings") & filters.private)
-async def settings_command(client, message):
-    await message.reply_text(
-        "⚙️ **User Settings**\n\nManage your custom thumbnail here:",
-        reply_markup=build_user_settings_keyboard(message.from_user.id)
+# ── /help ───────────────────────────────────────────────────────────────────
+@app.on_message(filters.command("help") & filters.private)
+async def help_cmd(client, message):
+    if not is_allowed(message.from_user.id):
+        return
+
+    text = (
+        "📖 *Full Command Reference*\n\n"
+        "*Download:*\n"
+        "`/rip <platform> <url> [quality]`\n"
+        "  platform → jiocinema, hotstar, netflix, aha, etc.\n"
+        "  quality  → 4K, 1080p, 720p, 480p\n\n"
+        "*Other commands:*\n"
+        "`/status` — Active downloads\n"
+        "`/cancel <job_id>` — Cancel a download\n"
+        "`/platforms` — All supported platforms"
     )
+    await message.reply_text(text, parse_mode="Markdown")
 
-# സെറ്റിംഗ്സ് ബട്ടൺ കോൾബാക്കുകൾ
-@app.on_callback_query(filters.regex("^(set_thumb|view_thumb|remove_thumb)$"))
-async def settings_callback(client, callback_query: CallbackQuery):
-    user_id = callback_query.from_user.id
-    data = callback_query.data
+# ── /platforms ──────────────────────────────────────────────────────────────
+@app.on_message(filters.command("platforms") & filters.private)
+async def platforms_cmd(client, message):
+    if not is_allowed(message.from_user.id):
+        return
 
-    if data == "set_thumb":
-        USER_STATES[user_id] = "waiting_for_thumb"
-        await callback_query.message.reply_text("📸 Please send the photo you want to set as custom thumbnail.")
-    elif data == "view_thumb":
-        if user_id in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[user_id]):
-            await client.send_photo(chat_id=user_id, photo=USER_THUMBNAILS[user_id], caption="🖼️ Your current custom thumbnail.")
+    text = (
+        "📡 *Supported Platforms*\n\n"
+        "🌍 *Global*\n"
+        f"`{'` · `'.join(PLATFORMS['global'])}`\n\n"
+        "🇮🇳 *Indian*\n"
+        f"`{'` · `'.join(PLATFORMS['indian'])}`\n\n"
+        "🗺️ *Regional*\n"
+        f"`{'` · `'.join(PLATFORMS['regional'])}`"
+    )
+    await message.reply_text(text, parse_mode="Markdown")
+
+# ── /rip ────────────────────────────────────────────────────────────────────
+@app.on_message(filters.command("rip") & filters.private)
+async def rip_cmd(client, message):
+    if not is_allowed(message.from_user.id):
+        await message.reply_text("⛔ Not authorised.")
+        return
+
+    args = message.command[1:]
+    if len(args) < 2:
+        await message.reply_text(
+            "❌ *Usage:* `/rip <platform> <url> [quality]`\n\n"
+            "Example: `/rip hotstar https://... 1080p`",
+            parse_mode="Markdown"
+        )
+        return
+
+    platform = args[0].lower()
+    url      = args[1]
+    quality  = args[2].upper() if len(args) > 2 and args[2].upper() in QUALITIES else "1080p"
+
+    if platform not in ALL_PLATFORMS:
+        await message.reply_text(
+            f"❌ Unknown platform `{platform}`.\nUse /platforms to see all supported ones.",
+            parse_mode="Markdown"
+        )
+        return
+
+    job_id   = str(uuid.uuid4())[:8]
+    started  = datetime.now().strftime("%H:%M:%S")
+
+    status_msg = await message.reply_text(
+        f"⬇️ *Download started!*\n\n"
+        f"🆔 Job ID: `{job_id}`\n"
+        f"📡 Platform: `{platform}`\n"
+        f"🎯 Quality: `{quality}`\n"
+        f"🕐 Started: `{started}`",
+        parse_mode="Markdown"
+    )
+    asyncio.create_task(run_rip_download(job_id, platform, url, quality, status_msg, message.from_user.id))
+
+async def run_rip_download(job_id, platform, url, quality, status_msg, user_id):
+    script = f"scripts/{_platform_folder(platform)}/{platform}.py"
+    cmd = ["python", script, "--url", url, "--quality", quality]
+
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            *cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        active_downloads[job_id] = {"process": proc}
+        stdout, stderr = await proc.communicate()
+
+        if user_id in CANCEL_REQUESTS:
+            await status_msg.edit_text("❌ **Task Cancelled successfully!**")
+            return
+
+        if proc.returncode == 0:
+            await status_msg.edit_text(f"✅ *Download complete!*\n🆔 Job `{job_id}` finished successfully.", parse_mode="Markdown")
         else:
-            await callback_query.answer("❌ No custom thumbnail set yet!", show_alert=True)
-    elif data == "remove_thumb":
-        if user_id in USER_THUMBNAILS:
-            if os.path.exists(USER_THUMBNAILS[user_id]):
-                os.remove(USER_THUMBNAILS[user_id])
-            del USER_THUMBNAILS[user_id]
-            await callback_query.answer("🗑️ Custom thumbnail removed successfully!", show_alert=True)
-        else:
-            await callback_query.answer("❌ No custom thumbnail to remove!", show_alert=True)
-        await callback_query.message.edit_reply_markup(reply_markup=build_user_settings_keyboard(user_id))
-    await callback_query.answer()
+            err = stderr.decode()[-300:] if stderr else "Unknown error"
+            await status_msg.edit_text(f"❌ *Download failed!*\n🆔 Job `{job_id}`\n\nError:\n`{err}`", parse_mode="Markdown")
+    except Exception as e:
+        await status_msg.edit_text(f"💥 *Unexpected error* in job `{job_id}`:\n`{str(e)}`", parse_mode="Markdown")
 
-# ടാസ്ക് കാൻസൽ ചെയ്യാനുള്ള കോൾബാക്ക് ഹാൻഡ്‌ലർ
+def _platform_folder(platform: str) -> str:
+    if platform in PLATFORMS["global"]:   return "global"
+    if platform in PLATFORMS["indian"]:   return "indian"
+    if platform in PLATFORMS["regional"]: return "regional"
+    return "global"
+
+# ── /status ──────────────────────────────────────────────────────────────────
+@app.on_message(filters.command("status") & filters.private)
+async def status_cmd(client, message):
+    if not is_allowed(message.from_user.id):
+        return
+
+    if not active_downloads:
+        await message.reply_text("📭 No active downloads right now.", parse_mode="Markdown")
+        return
+
+    lines = ["📊 *Active Downloads Status*\n"]
+    for jid in list(active_downloads.keys())[-10:]:
+        lines.append(f"⬇️ Job ID: `{jid}` — Running")
+
+    await message.reply_text("\n".join(lines), parse_mode="Markdown")
+
+# ── /cancel ───────────────────────────────────────────────────────────────────
+@app.on_message(filters.command("cancel") & filters.private)
+async def cancel_cmd(client, message):
+    if not is_allowed(message.from_user.id):
+        return
+
+    args = message.command[1:]
+    if not args:
+        await message.reply_text("Usage: `/cancel <job_id>`", parse_mode="Markdown")
+        return
+
+    job_id = args[0]
+    if job_id not in active_downloads:
+        await message.reply_text(f"❌ Job `{job_id}` not found.", parse_mode="Markdown")
+        return
+
+    info = active_downloads[job_id]
+    if info.get("process"):
+        info["process"].terminate()
+    await message.reply_text(f"🚫 Job `{job_id}` cancelled.", parse_mode="Markdown")
+
+# Task cancel callback handler
 @app.on_callback_query(filters.regex("^cancel_dl_"))
 async def cancel_task_callback(client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
@@ -204,37 +325,25 @@ async def cancel_task_callback(client, callback_query: CallbackQuery):
     else:
         await callback_query.answer("❌ You are not authorized to cancel this task!", show_alert=True)
 
-# ഫോട്ടോയോ ലിങ്കോ ഇൻപുട്ട് എടുക്കുന്ന ഹാൻഡ്‌ലർ
-@app.on_message(filters.private & ~filters.command(["start", "settings"]))
+# ── Direct Link Handler (Hotstar / JioCinema / etc.) ─────────────────────────
+@app.on_message(filters.private & ~filters.command(["start", "help", "platforms", "rip", "status", "cancel"]))
 async def handle_user_inputs(client, message):
     user_id = message.from_user.id
-    state = USER_STATES.get(user_id)
-
-    if state == "waiting_for_thumb" and message.photo:
-        os.makedirs("thumbnails", exist_ok=True)
-        thumb_path = f"thumbnails/{user_id}.jpg"
-        await message.download(file_name=thumb_path)
-        USER_THUMBNAILS[user_id] = thumb_path
-        USER_STATES[user_id] = None
-        await message.reply_text("✅ Custom thumbnail saved successfully!", reply_markup=build_user_settings_keyboard(user_id))
+    if not is_allowed(user_id):
         return
 
     text = message.text.strip() if message.text else ""
-    
-    # ഫുൾ യുആർഎൽ കൃത്യമായി എക്സ്ട്രാക്ട് ചെയ്യാൻ റെഗുലർ എക്സ്പ്രഷൻ ഉപയോഗിക്കുന്നു
     url_match = re.search(r'https?://[^\s]+', text)
     extracted_url = url_match.group(0) if url_match else text
 
-    if "hotstar.com" in extracted_url or "jiocinema.com" in extracted_url or "jiohotstar.com" in extracted_url:
+    if any(p in extracted_url for p in ["hotstar.com", "jiocinema.com", "jiohotstar.com"]):
         parts = text.split("-n")
         url = url_match.group(0) if url_match else parts[0].strip()
         custom_name = parts[1].strip() if len(parts) > 1 else None
 
         USER_URLS[user_id] = {"url": url, "custom_name": custom_name}
         
-        status_msg = await message.reply_text(
-            "⏳ **Fetching JioHotstar video info & original thumbnail... Please wait!**"
-        )
+        status_msg = await message.reply_text("⏳ **Fetching video info & original thumbnail... Please wait!**")
 
         cookie_file_path = "cookies.txt" if os.path.exists("cookies.txt") else None
 
@@ -253,21 +362,19 @@ async def handle_user_inputs(client, message):
                     return ydl.extract_info(url, download=False)
 
             info = await asyncio.to_thread(extract_info_fast)
-            title = info.get('title', 'JioHotstar Video')
+            title = info.get('title', 'OTT Video')
             thumbnail_url = info.get('thumbnail')
             if not thumbnail_url and 'thumbnails' in info:
                 thumbnails = info.get('thumbnails', [])
                 if thumbnails:
                     thumbnail_url = thumbnails[-1].get('url')
 
-            # ഒറിജിനൽ തംബ്‌നെയിൽ മുൻകൂട്ടി ഡൗൺലോഡ് ചെയ്ത് സേവ് ചെയ്തു വെക്കുന്നു
             yt_thumb_path = None
             if thumbnail_url:
                 yt_thumb_path = await asyncio.to_thread(download_youtube_thumbnail, thumbnail_url, user_id)
             if yt_thumb_path:
                 USER_THUMBNAILS[f"yt_{user_id}"] = yt_thumb_path
 
-            # 144p ഒഴിവാക്കി ബാക്കി ക്വാളിറ്റി ബട്ടണുകൾ മാത്രം നൽകിയിരിക്കുന്നു
             keyboard = InlineKeyboardMarkup([
                 [InlineKeyboardButton("🎵 Extract MP3 Audio", callback_data="dl|audio|mp3|all")],
                 [
@@ -284,40 +391,25 @@ async def handle_user_inputs(client, message):
                 ]
             ])
 
-            caption_text = (
-                f"🎬 <b>{title}</b>\n\n"
-                "👇 <b>Select your preferred quality:</b>"
-            )
+            caption_text = f"🎬 <b>{title}</b>\n\n👇 <b>Select your preferred quality:</b>"
 
             if thumbnail_url:
                 try:
-                    await message.reply_photo(
-                        photo=thumbnail_url,
-                        caption=caption_text,
-                        reply_markup=keyboard
-                    )
+                    await message.reply_photo(photo=thumbnail_url, caption=caption_text, reply_markup=keyboard)
                     await status_msg.delete()
                     return
                 except Exception:
                     pass
 
-            await status_msg.edit_text(
-                caption_text,
-                reply_markup=keyboard
-            )
+            await status_msg.edit_text(caption_text, reply_markup=keyboard)
 
         except Exception as e:
-            logging.exception("JioHotstar info extraction error: %s", e)
-            await status_msg.edit_text(
-                "❌ Could not fetch JioHotstar video info.\n\n"
-                f"<b>Reason:</b> <code>{html.escape(str(e)[:500])}</code>",
-                parse_mode="html",
-            )
+            logging.exception("Info extraction error: %s", e)
+            await status_msg.edit_text(f"❌ Could not fetch video info.\n\n<b>Reason:</b> <code>{html.escape(str(e)[:500])}</code>", parse_mode="html")
     else:
-        if not state:
-            await message.reply_text("❌ Please send a valid JioHotstar link with `-n custom_name` or use `/settings`.")
+        await message.reply_text("❌ Please send a valid OTT link or use `/rip` command.")
 
-# ക്വാളിറ്റി ബട്ടൺ ക്ലിക്ക് ചെയ്യുമ്പോൾ ഓഡിയോ ലാംഗ്വേജ് ഓപ്ഷനുകൾ കാണിക്കുക
+# വേഗത്തിൽ ഓഡിയോ ലാംഗ്വേജ് ലിസ്റ്റ് ലോഡ് ചെയ്യാൻ ഒപ്റ്റിമൈസ് ചെയ്ത ഹാൻഡ്‌ലർ
 @app.on_callback_query(filters.regex("^dl\|video\|"))
 async def select_audio_languages(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
@@ -331,34 +423,9 @@ async def select_audio_languages(client, callback_query: CallbackQuery):
         return
 
     url = user_data["url"]
-    cookie_file_path = "cookies.txt" if os.path.exists("cookies.txt") else None
     
-    ydl_opts = {
-        'quiet': True,
-        'no_warnings': True,
-        'skip_download': True,
-        'cookiefile': cookie_file_path,
-        'nocheckcertificate': True
-    }
-
-    detected_langs = []
-    try:
-        def get_formats():
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                return ydl.extract_info(url, download=False)
-        
-        info = await asyncio.to_thread(get_formats)
-        formats = info.get('formats', [])
-        
-        for f in formats:
-            lang = f.get('language') or f.get('language_preference')
-            if lang and str(lang) not in detected_langs:
-                detected_langs.append(str(lang))
-    except Exception:
-        pass
-
-    if not detected_langs:
-        detected_langs = ["mal", "tam", "hin", "eng"]
+    # ലോഡിങ് വേഗത്തിലാക്കാൻ ലാംഗ്വേജ് ഡിറ്റക്ഷൻ പ്രോസസ്സ് ലൈറ്റാക്കി മാറ്റിയിരിക്കുന്നു
+    detected_langs = ["mal", "tam", "hin", "eng", "tel", "kan"]
 
     audio_buttons = []
     for lang in detected_langs:
@@ -446,7 +513,6 @@ async def download_final_media(client, callback_query: CallbackQuery):
             _, ext = os.path.splitext(orig_filename)
             
             if custom_name:
-                # കസ്റ്റം നെയിമിലെ ഫോർവേഡ് സ്ലാഷുകൾ ഒഴിവാക്കി സുരക്ഷിതമാക്കുന്നു
                 safe_custom_name = custom_name.replace("/", "_").replace("\\", "_")
                 new_filename = os.path.join(dir_name, f"{safe_custom_name}_{selected_audio.upper()}{ext}")
                 if os.path.exists(new_filename):
@@ -473,7 +539,7 @@ async def download_final_media(client, callback_query: CallbackQuery):
             file_name=file_name,
             duration=duration,
             thumb=thumb_path,
-            caption=f"📹 Here is your JioHotstar Video ({quality}p - Audio: {selected_audio.upper()})"
+            caption=f"📹 Here is your OTT Video ({quality}p - Audio: {selected_audio.upper()})"
         )
 
         await status_msg.delete()
@@ -500,5 +566,5 @@ async def download_final_media(client, callback_query: CallbackQuery):
         CANCEL_REQUESTS.discard(user_id)
 
 if __name__ == "__main__":
-    print("Bot is running...")
+    print("🤖 OTT Bot is running... Press Ctrl+C to stop.")
     app.run()
