@@ -10,6 +10,8 @@ import subprocess
 import uuid
 from datetime import datetime
 from dotenv import load_dotenv
+from pyrogram import Client, filters
+from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 load_dotenv()
 
