@@ -446,7 +446,9 @@ async def download_final_media(client, callback_query: CallbackQuery):
             _, ext = os.path.splitext(orig_filename)
             
             if custom_name:
-                new_filename = os.path.join(dir_name, f"{custom_name}_{selected_audio.upper()}{ext}")
+                # കസ്റ്റം നെയിമിലെ ഫോർവേഡ് സ്ലാഷുകൾ ഒഴിവാക്കി സുരക്ഷിതമാക്കുന്നു
+                safe_custom_name = custom_name.replace("/", "_").replace("\\", "_")
+                new_filename = os.path.join(dir_name, f"{safe_custom_name}_{selected_audio.upper()}{ext}")
                 if os.path.exists(new_filename):
                     os.remove(new_filename)
                 os.rename(filename, new_filename)
