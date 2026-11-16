@@ -10,6 +10,8 @@ import subprocess
 import uuid
 from datetime import datetime
 from dotenv import load_dotenv
+from hachoir.metadata import extractMetadata
+from hachoir.parser import createParser
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
@@ -146,7 +148,7 @@ def get_progress_hook(client, message, user_id, title="Downloading"):
 # Pyrogram ക്라이언트 initialization
 app = Client(
     "jiohotstar_bot",
-    api_id=API_ID,
+    api_id=int(API_ID) if API_ID and API_ID.isdigit() else 0,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
@@ -160,14 +162,14 @@ async def start(client, message):
 
     text = (
         "🎬 *OTT Downloader Bot*\n\n"
-        "Download from 20+ OTT platforms directly via Telegram.\n\n"
+        "Download from JioHotstar & other OTT platforms directly via Telegram.\n\n"
         "*Quick commands:*\n"
         "`/rip <platform> <url>` — Start a download\n"
         "`/status` — View active downloads\n"
         "`/platforms` — List all supported platforms\n"
         "`/help` — Full help"
     )
-    await message.reply_text(text, parse_mode="Markdown")
+    await message.reply_text(text, parse_mode="markdown")
 
 # ── /help ───────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("help") & filters.private)
@@ -179,14 +181,14 @@ async def help_cmd(client, message):
         "📖 *Full Command Reference*\n\n"
         "*Download:*\n"
         "`/rip <platform> <url> [quality]`\n"
-        "  platform → jiocinema, hotstar, netflix, aha, etc.\n"
+        "  platform → hotstar, jiocinema, netflix, etc.\n"
         "  quality  → 4K, 1080p, 720p, 480p\n\n"
         "*Other commands:*\n"
         "`/status` — Active downloads\n"
         "`/cancel <job_id>` — Cancel a download\n"
         "`/platforms` — All supported platforms"
     )
-    await message.reply_text(text, parse_mode="Markdown")
+    await message.reply_text(text, parse_mode="markdown")
 
 # ── /platforms ──────────────────────────────────────────────────────────────
 @app.on_message(filters.command("platforms") & filters.private)
@@ -203,7 +205,7 @@ async def platforms_cmd(client, message):
         "🗺️ *Regional*\n"
         f"`{'` · `'.join(PLATFORMS['regional'])}`"
     )
-    await message.reply_text(text, parse_mode="Markdown")
+    await message.reply_text(text, parse_mode="markdown")
 
 # ── /rip ────────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("rip") & filters.private)
@@ -217,7 +219,7 @@ async def rip_cmd(client, message):
         await message.reply_text(
             "❌ *Usage:* `/rip <platform> <url> [quality]`\n\n"
             "Example: `/rip hotstar https://... 1080p`",
-            parse_mode="Markdown"
+            parse_mode="markdown"
         )
         return
 
@@ -228,7 +230,7 @@ async def rip_cmd(client, message):
     if platform not in ALL_PLATFORMS:
         await message.reply_text(
             f"❌ Unknown platform `{platform}`.\nUse /platforms to see all supported ones.",
-            parse_mode="Markdown"
+            parse_mode="markdown"
         )
         return
 
@@ -241,7 +243,7 @@ async def rip_cmd(client, message):
         f"📡 Platform: `{platform}`\n"
         f"🎯 Quality: `{quality}`\n"
         f"🕐 Started: `{started}`",
-        parse_mode="Markdown"
+        parse_mode="markdown"
     )
     asyncio.create_task(run_rip_download(job_id, platform, url, quality, status_msg, message.from_user.id))
 
@@ -263,12 +265,12 @@ async def run_rip_download(job_id, platform, url, quality, status_msg, user_id):
             return
 
         if proc.returncode == 0:
-            await status_msg.edit_text(f"✅ *Download complete!*\n🆔 Job `{job_id}` finished successfully.", parse_mode="Markdown")
+            await status_msg.edit_text(f"✅ *Download complete!*\n🆔 Job `{job_id}` finished successfully.", parse_mode="markdown")
         else:
             err = stderr.decode()[-300:] if stderr else "Unknown error"
-            await status_msg.edit_text(f"❌ *Download failed!*\n🆔 Job `{job_id}`\n\nError:\n`{err}`", parse_mode="Markdown")
+            await status_msg.edit_text(f"❌ *Download failed!*\n🆔 Job `{job_id}`\n\nError:\n`{err}`", parse_mode="markdown")
     except Exception as e:
-        await status_msg.edit_text(f"💥 *Unexpected error* in job `{job_id}`:\n`{str(e)}`", parse_mode="Markdown")
+        await status_msg.edit_text(f"💥 *Unexpected error* in job `{job_id}`:\n`{str(e)}`", parse_mode="markdown")
 
 def _platform_folder(platform: str) -> str:
     if platform in PLATFORMS["global"]:   return "global"
@@ -283,14 +285,14 @@ async def status_cmd(client, message):
         return
 
     if not active_downloads:
-        await message.reply_text("📭 No active downloads right now.", parse_mode="Markdown")
+        await message.reply_text("📭 No active downloads right now.", parse_mode="markdown")
         return
 
     lines = ["📊 *Active Downloads Status*\n"]
     for jid in list(active_downloads.keys())[-10:]:
         lines.append(f"⬇️ Job ID: `{jid}` — Running")
 
-    await message.reply_text("\n".join(lines), parse_mode="Markdown")
+    await message.reply_text("\n".join(lines), parse_mode="markdown")
 
 # ── /cancel ───────────────────────────────────────────────────────────────────
 @app.on_message(filters.command("cancel") & filters.private)
@@ -300,18 +302,18 @@ async def cancel_cmd(client, message):
 
     args = message.command[1:]
     if not args:
-        await message.reply_text("Usage: `/cancel <job_id>`", parse_mode="Markdown")
+        await message.reply_text("Usage: `/cancel <job_id>`", parse_mode="markdown")
         return
 
     job_id = args[0]
     if job_id not in active_downloads:
-        await message.reply_text(f"❌ Job `{job_id}` not found.", parse_mode="Markdown")
+        await message.reply_text(f"❌ Job `{job_id}` not found.", parse_mode="markdown")
         return
 
     info = active_downloads[job_id]
     if info.get("process"):
         info["process"].terminate()
-    await message.reply_text(f"🚫 Job `{job_id}` cancelled.", parse_mode="Markdown")
+    await message.reply_text(f"🚫 Job `{job_id}` cancelled.", parse_mode="markdown")
 
 # Task cancel callback handler
 @app.on_callback_query(filters.regex("^cancel_dl_"))
@@ -409,7 +411,7 @@ async def handle_user_inputs(client, message):
         await message.reply_text("❌ Please send a valid OTT link or use `/rip` command.")
 
 # വേഗത്തിൽ ഓഡിയോ ലാംഗ്വേജ് ലിസ്റ്റ് ലോഡ് ചെയ്യാൻ ഒപ്റ്റിമൈസ് ചെയ്ത ഹാൻഡ്‌ലർ
-@app.on_callback_query(filters.regex("^dl\|video\|"))
+@app.on_callback_query(filters.regex("^dl\\|video\\|"))
 async def select_audio_languages(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
     quality = data_parts[2]
@@ -421,9 +423,6 @@ async def select_audio_languages(client, callback_query: CallbackQuery):
         await callback_query.message.edit_text("❌ Link expired. Please send the link again.")
         return
 
-    url = user_data["url"]
-    
-    # ലോഡിങ് വേഗത്തിലാക്കാൻ ലാംഗ്വേജ് ഡിറ്റക്ഷൻ പ്രോസസ്സ് ലൈറ്റാക്കി മാറ്റിയിരിക്കുന്നു
     detected_langs = ["mal", "tam", "hin", "eng", "tel", "kan"]
 
     audio_buttons = []
@@ -446,7 +445,7 @@ async def select_audio_languages(client, callback_query: CallbackQuery):
     await callback_query.answer("Select audio language(s):")
 
 # അന്തിമമായി ഡൗൺലോഡ് ചെയ്ത് അപ്‌ലോഡ് ചെയ്യുന്ന ഹാൻഡ്‌ലർ
-@app.on_callback_query(filters.regex("^dl_final\|"))
+@app.on_callback_query(filters.regex("^dl_final\\|"))
 async def download_final_media(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
     quality = data_parts[1]
