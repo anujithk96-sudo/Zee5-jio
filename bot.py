@@ -381,7 +381,7 @@ async def download_media(client, callback_query: CallbackQuery):
         elif f"yt_{user_id}" in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[f"yt_{user_id}"]):
             thumb_path = USER_THUMBNAILS[f"yt_{user_id}"]
             
-        # 3. ഇവയെല്ലാം ഇല്ലെങ്കിൽ വീഡിയോയുടെ ഉള്ളിൽ നിന്ന് 5-ാം സെക്കൻഡിൽ ഓട്ടോ തംബ്‌നെയിൽ ജനറേറ്റ് ചെയ്യും
+        # 3. ഇവയെല്ലാം ഇല്ലെങ്കിൽ ഡൗൺലോഡ് ചെയ്ത വീഡിയോയുടെ ഉള്ളിൽ നിന്ന് 5-ാം സെക്കൻഡിൽ ഓട്ടോ തംബ്‌നെയിൽ ജനറേറ്റ് ചെയ്യും
         if not thumb_path or not os.path.exists(thumb_path):
             thumb_path = generate_thumbnail(filename, user_id)
 
