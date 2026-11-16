@@ -3,6 +3,8 @@ import os
 import time
 import asyncio
 import yt_dlp
+import shutil
+import html
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from pyrogram import Client, filters
@@ -153,33 +155,92 @@ async def handle_user_inputs(client, message):
         return
 
     text = message.text.strip() if message.text else ""
-    if "hotstar.com" in text:
+    if "hotstar.com" in text or "jiocinema.com" in text or "jiohotstar.com" in text:
         parts = text.split("-n")
         url = parts[0].strip()
         custom_name = parts[1].strip() if len(parts) > 1 else None
 
         USER_URLS[user_id] = {"url": url, "custom_name": custom_name}
         
-        # എല്ലാ ക്വാളിറ്റികളും MP3 ഓപ്ഷനും ഉൾപ്പെടുത്തിയ കീബോർഡ്
-        keyboard = InlineKeyboardMarkup([
-            [InlineKeyboardButton("🎵 Extract MP3 Audio", callback_data="dl|audio|mp3")],
-            [
-                InlineKeyboardButton("📹 144p", callback_data="dl|video|144"),
-                InlineKeyboardButton("📹 240p", callback_data="dl|video|240")
-            ],
-            [
-                InlineKeyboardButton("📹 360p", callback_data="dl|video|360"),
-                InlineKeyboardButton("📹 480p", callback_data="dl|video|480")
-            ],
-            [
-                InlineKeyboardButton("📹 576p", callback_data="dl|video|576"),
-                InlineKeyboardButton("📹 720p", callback_data="dl|video|720")
-            ],
-            [
-                InlineKeyboardButton("📹 1080p", callback_data="dl|video|1080")
-            ]
-        ])
-        await message.reply_text("📥 JioHotstar link detected! Please select your required format:", reply_markup=keyboard)
+        status_msg = await message.reply_text(
+            "⏳ **Fetching JioHotstar video info & original thumbnail... Please wait!**"
+        )
+
+        cookie_file_path = "cookies.txt" if os.path.exists("cookies.txt") else None
+
+        try:
+            ydl_opts = {
+                'quiet': True,
+                'no_warnings': True,
+                'skip_download': True,
+                'noplaylist': True,
+                'cookiefile': cookie_file_path,
+                'nocheckcertificate': True
+            }
+
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                try:
+                    info = ydl.extract_info(url, download=False)
+                except Exception:
+                    if not ydl_opts.get('cookiefile'):
+                        raise
+                    fallback_opts = dict(ydl_opts)
+                    fallback_opts.pop('cookiefile', None)
+                    with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
+                        info = fallback_ydl.extract_info(url, download=False)
+
+                title = info.get('title', 'JioHotstar Video')
+                thumbnail_url = info.get('thumbnail')
+
+                # എല്ലാ ക്വാളിറ്റികളും MP3 ഓപ്ഷനും ഉൾപ്പെടുത്തിയ കീബോർഡ്
+                keyboard = InlineKeyboardMarkup([
+                    [InlineKeyboardButton("🎵 Extract MP3 Audio", callback_data="dl|audio|mp3")],
+                    [
+                        InlineKeyboardButton("📹 144p", callback_data="dl|video|144"),
+                        InlineKeyboardButton("📹 240p", callback_data="dl|video|240")
+                    ],
+                    [
+                        InlineKeyboardButton("📹 360p", callback_data="dl|video|360"),
+                        InlineKeyboardButton("📹 480p", callback_data="dl|video|480")
+                    ],
+                    [
+                        InlineKeyboardButton("📹 576p", callback_data="dl|video|576"),
+                        InlineKeyboardButton("📹 720p", callback_data="dl|video|720")
+                    ],
+                    [
+                        InlineKeyboardButton("📹 1080p", callback_data="dl|video|1080")
+                    ]
+                ])
+
+                caption_text = (
+                    f"🎬 <b>{title}</b>\n\n"
+                    "👇 <b>Select your preferred quality:</b>"
+                )
+
+                if thumbnail_url:
+                    try:
+                        await message.reply_photo(
+                            photo=thumbnail_url,
+                            caption=caption_text,
+                            reply_markup=keyboard
+                        )
+                        await status_msg.delete()
+                        return
+                    except Exception:
+                        pass
+
+                await status_msg.edit_text(
+                    caption_text,
+                    reply_markup=keyboard
+                )
+
+        except Exception as e:
+            logging.exception("JioHotstar info extraction error: %s")
+            await status_msg.edit_text(
+                "❌ Could not fetch JioHotstar video info.\n\n"
+                f"<b>Reason:</b> <code>{html.escape(str(e)[:500])}</code>",
+                parse_mode="html",
+            )
     else:
         if not state:
             await message.reply_text("❌ Please send a valid JioHotstar link with `-n custom_name` or use `/settings`.")
@@ -201,8 +262,17 @@ async def download_media(client, callback_query: CallbackQuery):
     url = user_data["url"]
     custom_name = user_data["custom_name"]
 
+    try:
+        await callback_query.message.delete()
+    except Exception:
+        pass
+
+    status_msg = await client.send_message(
+        chat_id=callback_query.message.chat.id,
+        text=f"⏳ Initializing download for `{quality}`... Please wait."
+    )
+
     if media_type == "audio":
-        status_msg = await callback_query.message.edit_text("🎵 Extracting MP3 audio... Please wait...")
         ydl_opts = {
             'format': 'bestaudio/best',
             'outtmpl': 'downloads/%(title)s.%(ext)s',
@@ -214,7 +284,6 @@ async def download_media(client, callback_query: CallbackQuery):
             'progress_hooks': [get_progress_hook(client, status_msg, "Downloading Audio")],
         }
     else:
-        status_msg = await callback_query.message.edit_text(f"📥 Downloading {quality}p video... Please wait...")
         ydl_opts = {
             'format': f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
             'outtmpl': 'downloads/%(title)s.%(ext)s',
