@@ -5,6 +5,7 @@ import asyncio
 import yt_dlp
 import shutil
 import html
+import subprocess
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from pyrogram import Client, filters
@@ -50,6 +51,50 @@ def get_video_duration(file_path):
     except Exception:
         pass
     return 0
+
+# ഒറിജിനൽ തംബ്‌നെയിൽ ലിങ്കിൽ നിന്ന് ഡൗൺലോഡ് ചെയ്ത് ലോക്കൽ ഫയലാക്കാൻ
+def download_youtube_thumbnail(thumbnail_url, user_id):
+    os.makedirs("thumbnails", exist_ok=True)
+    thumb_path = f"thumbnails/yt_{user_id}.jpg"
+    try:
+        import requests
+        response = requests.get(thumbnail_url, timeout=10)
+        if response.status_code == 200:
+            with open(thumb_path, "wb") as f:
+                f.write(response.content)
+            if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+                converted_thumb = f"thumbnails/thumb_{user_id}.jpg"
+                result = subprocess.run(
+                    ["ffmpeg", "-y", "-i", thumb_path, "-vf",
+                     "scale=320:320:force_original_aspect_ratio=decrease",
+                     "-q:v", "5", converted_thumb],
+                    stdout=subprocess.PIPE, stderr=subprocess.PIPE
+                )
+                if os.path.exists(thumb_path):
+                    os.remove(thumb_path)
+                if result.returncode == 0 and os.path.exists(converted_thumb):
+                    return converted_thumb
+                elif os.path.exists(thumb_path):
+                    return thumb_path
+    except Exception as e:
+        logger.error(f"Error downloading YouTube/Hotstar thumbnail: {e}")
+    return None
+
+# ഒറിജിനൽ തംബ്‌നെയിൽ കിട്ടിയില്ലെങ്കിൽ വീഡിയോയിൽ നിന്ന് 5-ാം സെക്കൻഡിൽ ഫോട്ടോ എടുക്കാൻ
+def generate_thumbnail(video_path, user_id):
+    os.makedirs("thumbnails", exist_ok=True)
+    thumb_path = f"thumbnails/auto_{user_id}.jpg"
+    try:
+        cmd = [
+            "ffmpeg", "-ss", "00:00:05", "-i", video_path,
+            "-vframes", "1", "-q:v", "2", thumb_path, "-y"
+        ]
+        subprocess.run(cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+        if os.path.exists(thumb_path) and os.path.getsize(thumb_path) > 0:
+            return thumb_path
+    except Exception as e:
+        logger.error(f"Error generating thumbnail: {e}")
+    return None
 
 # പ്രോഗ്രസ് ബാർ (ബ്ലാക്ക് ബോക്സ് രീതിയിൽ നിറയുന്നത്) ഉണ്ടാക്കാൻ
 def get_progress_bar(percentage):
@@ -178,64 +223,69 @@ async def handle_user_inputs(client, message):
                 'nocheckcertificate': True
             }
 
-            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            def extract_info_fast():
+                with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                    return ydl.extract_info(url, download=False)
+
+            info = await asyncio.to_thread(extract_info_fast)
+            title = info.get('title', 'JioHotstar Video')
+            thumbnail_url = info.get('thumbnail')
+            if not thumbnail_url and 'thumbnails' in info:
+                thumbnails = info.get('thumbnails', [])
+                if thumbnails:
+                    thumbnail_url = thumbnails[-1].get('url')
+
+            # ഒറിജിനൽ തംബ്‌നെയിൽ മുൻകൂട്ടി ഡൗൺലോഡ് ചെയ്ത് സേവ് ചെയ്തു വെക്കുന്നു
+            yt_thumb_path = None
+            if thumbnail_url:
+                yt_thumb_path = await asyncio.to_thread(download_youtube_thumbnail, thumbnail_url, user_id)
+            if yt_thumb_path:
+                USER_THUMBNAILS[f"yt_{user_id}"] = yt_thumb_path
+
+            # എല്ലാ ക്വാളിറ്റികളും MP3 ഓപ്ഷനും ഉൾപ്പെടുത്തിയ കീബോർഡ്
+            keyboard = InlineKeyboardMarkup([
+                [InlineKeyboardButton("🎵 Extract MP3 Audio", callback_data="dl|audio|mp3")],
+                [
+                    InlineKeyboardButton("📹 144p", callback_data="dl|video|144"),
+                    InlineKeyboardButton("📹 240p", callback_data="dl|video|240")
+                ],
+                [
+                    InlineKeyboardButton("📹 360p", callback_data="dl|video|360"),
+                    InlineKeyboardButton("📹 480p", callback_data="dl|video|480")
+                ],
+                [
+                    InlineKeyboardButton("📹 576p", callback_data="dl|video|576"),
+                    InlineKeyboardButton("📹 720p", callback_data="dl|video|720")
+                ],
+                [
+                    InlineKeyboardButton("📹 1080p", callback_data="dl|video|1080")
+                ]
+            ])
+
+            caption_text = (
+                f"🎬 <b>{title}</b>\n\n"
+                "👇 <b>Select your preferred quality:</b>"
+            )
+
+            if thumbnail_url:
                 try:
-                    info = ydl.extract_info(url, download=False)
+                    await message.reply_photo(
+                        photo=thumbnail_url,
+                        caption=caption_text,
+                        reply_markup=keyboard
+                    )
+                    await status_msg.delete()
+                    return
                 except Exception:
-                    if not ydl_opts.get('cookiefile'):
-                        raise
-                    fallback_opts = dict(ydl_opts)
-                    fallback_opts.pop('cookiefile', None)
-                    with yt_dlp.YoutubeDL(fallback_opts) as fallback_ydl:
-                        info = fallback_ydl.extract_info(url, download=False)
+                    pass
 
-                title = info.get('title', 'JioHotstar Video')
-                thumbnail_url = info.get('thumbnail')
-
-                # എല്ലാ ക്വാളിറ്റികളും MP3 ഓപ്ഷനും ഉൾപ്പെടുത്തിയ കീബോർഡ്
-                keyboard = InlineKeyboardMarkup([
-                    [InlineKeyboardButton("🎵 Extract MP3 Audio", callback_data="dl|audio|mp3")],
-                    [
-                        InlineKeyboardButton("📹 144p", callback_data="dl|video|144"),
-                        InlineKeyboardButton("📹 240p", callback_data="dl|video|240")
-                    ],
-                    [
-                        InlineKeyboardButton("📹 360p", callback_data="dl|video|360"),
-                        InlineKeyboardButton("📹 480p", callback_data="dl|video|480")
-                    ],
-                    [
-                        InlineKeyboardButton("📹 576p", callback_data="dl|video|576"),
-                        InlineKeyboardButton("📹 720p", callback_data="dl|video|720")
-                    ],
-                    [
-                        InlineKeyboardButton("📹 1080p", callback_data="dl|video|1080")
-                    ]
-                ])
-
-                caption_text = (
-                    f"🎬 <b>{title}</b>\n\n"
-                    "👇 <b>Select your preferred quality:</b>"
-                )
-
-                if thumbnail_url:
-                    try:
-                        await message.reply_photo(
-                            photo=thumbnail_url,
-                            caption=caption_text,
-                            reply_markup=keyboard
-                        )
-                        await status_msg.delete()
-                        return
-                    except Exception:
-                        pass
-
-                await status_msg.edit_text(
-                    caption_text,
-                    reply_markup=keyboard
-                )
+            await status_msg.edit_text(
+                caption_text,
+                reply_markup=keyboard
+            )
 
         except Exception as e:
-            logging.exception("JioHotstar info extraction error: %s")
+            logging.exception("JioHotstar info extraction error: %s", e)
             await status_msg.edit_text(
                 "❌ Could not fetch JioHotstar video info.\n\n"
                 f"<b>Reason:</b> <code>{html.escape(str(e)[:500])}</code>",
@@ -295,39 +345,56 @@ async def download_media(client, callback_query: CallbackQuery):
         ydl_opts['cookiefile'] = "cookies.txt"
 
     thumb_path = None
+    filename = None
     try:
         os.makedirs("downloads", exist_ok=True)
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            info = ydl.extract_info(url, download=True)
-            filename = ydl.prepare_filename(info)
-            
-            if media_type == "audio":
-                filename = os.path.splitext(filename)[0] + ".mp3"
+        def run_download():
+            with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+                info = ydl.extract_info(url, download=True)
+                fname = ydl.prepare_filename(info)
+                if media_type == "audio":
+                    fname = os.path.splitext(fname)[0] + ".mp3"
+                return fname
+
+        filename = await asyncio.to_thread(run_download)
 
         # -n വഴി നൽകിയ കസ്റ്റം പേര് അനുസരിച്ച് ഫയൽ റീനെയിം ചെയ്യൽ
-        dir_name, orig_filename = os.path.split(filename)
-        name_part, ext = os.path.splitext(orig_filename)
-        
-        if custom_name:
-            new_filename = os.path.join(dir_name, f"{custom_name}{ext}")
-            os.rename(filename, new_filename)
-            filename = new_filename
+        if filename and os.path.exists(filename):
+            dir_name, orig_filename = os.path.split(filename)
+            _, ext = os.path.splitext(orig_filename)
+            
+            if custom_name:
+                new_filename = os.path.join(dir_name, f"{custom_name}{ext}")
+                if os.path.exists(new_filename):
+                    os.remove(new_filename)
+                os.rename(filename, new_filename)
+                filename = new_filename
 
         await status_msg.edit_text("📤 Uploading to Telegram...")
+
+        # തംബ്‌നെയിൽ തെരഞ്ഞെടുക്കുന്ന ക്രമം:
+        # 1. യൂസർ സെറ്റ് ചെയ്ത കസ്റ്റം തംബ്‌നെയിൽ
+        if user_id in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[user_id]):
+            thumb_path = USER_THUMBNAILS[user_id]
+        
+        # 2. ലിങ്ക് ഫെച്ച് ചെയ്തപ്പോൾ കിട്ടിയ ഒറിജിനൽ തംബ്‌നെയിൽ
+        elif f"yt_{user_id}" in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[f"yt_{user_id}"]):
+            thumb_path = USER_THUMBNAILS[f"yt_{user_id}"]
+            
+        # 3. ഇവയെല്ലാം ഇല്ലെങ്കിൽ വീഡിയോയുടെ ഉള്ളിൽ നിന്ന് 5-ാം സെക്കൻഡിൽ ഓട്ടോ തംബ്‌നെയിൽ ജനറേറ്റ് ചെയ്യും
+        if not thumb_path or not os.path.exists(thumb_path):
+            thumb_path = generate_thumbnail(filename, user_id)
 
         if media_type == "audio":
             await client.send_audio(
                 chat_id=callback_query.message.chat.id,
                 audio=filename,
+                thumb=thumb_path,
                 caption="🎵 Here is your JioHotstar MP3 Audio!"
             )
         else:
             file_name = os.path.basename(filename)
             duration = get_video_duration(filename)
-            
-            # യൂസർ സെറ്റ് ചെയ്ത തംബ്‌നെയിൽ ഉണ്ടെങ്കിൽ അത് എടുക്കുന്നു
-            if user_id in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[user_id]):
-                thumb_path = USER_THUMBNAILS[user_id]
 
             await client.send_video(
                 chat_id=callback_query.message.chat.id,
@@ -341,11 +408,21 @@ async def download_media(client, callback_query: CallbackQuery):
         await status_msg.delete()
         
         # ഫയൽ ക്ലീനപ്പ്
-        if os.path.exists(filename):
+        if filename and os.path.exists(filename):
             os.remove(filename)
+        if thumb_path and "thumbnails/auto_" in thumb_path and os.path.exists(thumb_path):
+            os.remove(thumb_path)
+        if f"yt_{user_id}" in USER_THUMBNAILS:
+            try:
+                os.remove(USER_THUMBNAILS[f"yt_{user_id}"])
+                del USER_THUMBNAILS[f"yt_{user_id}"]
+            except:
+                pass
 
     except Exception as e:
         await status_msg.edit_text(f"❌ Download failed: {str(e)}")
+        if filename and os.path.exists(filename):
+            os.remove(filename)
 
 if __name__ == "__main__":
     print("Bot is running...")
