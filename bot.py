@@ -391,7 +391,7 @@ async def handle_user_inputs(client, message):
     else:
         await message.reply_text("❌ Please send a valid OTT link or use /rip command.")
 
-@app.on_callback_query(filters.regex(r"^dl\\|video\\|"))
+@app.on_callback_query(filters.regex(r"^dl\|video\|"))
 async def select_audio_languages(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
     quality = data_parts[2]
@@ -424,7 +424,7 @@ async def select_audio_languages(client, callback_query: CallbackQuery):
     )
     await callback_query.answer("Select audio language(s):")
 
-@app.on_callback_query(filters.regex(r"^dl_final\\|"))
+@app.on_callback_query(filters.regex(r"^dl_final\|"))
 async def download_final_media(client, callback_query: CallbackQuery):
     data_parts = callback_query.data.split("|")
     quality = data_parts[1]
@@ -497,4 +497,54 @@ async def download_final_media(client, callback_query: CallbackQuery):
                 os.rename(filename, new_filename)
                 filename = new_filename
 
-        await status_msg.edit
+        await status_msg.edit_text("📤 Uploading to Telegram...", reply_markup=cancel_keyboard)
+
+        if user_id in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[user_id]):
+            thumb_path = USER_THUMBNAILS[user_id]
+        elif f"yt_{user_id}" in USER_THUMBNAILS and os.path.exists(USER_THUMBNAILS[f"yt_{user_id}"]):
+            thumb_path = USER_THUMBNAILS[f"yt_{user_id}"]
+            
+        if not thumb_path or not os.path.exists(thumb_path):
+            thumb_path = generate_thumbnail(filename, user_id)
+
+        file_name = os.path.basename(filename)
+        duration = get_video_duration(filename)
+
+        await client.send_video(
+            chat_id=callback_query.message.chat.id,
+            video=filename,
+            file_name=file_name,
+            duration=duration,
+            thumb=thumb_path,
+            caption=f"📹 Here is your OTT Video ({quality}p - Audio: {selected_audio.upper()})"
+        )
+
+        await status_msg.delete()
+        
+    except Exception as e:
+        if user_id in CANCEL_REQUESTS or "cancelled" in str(e).lower():
+            await status_msg.edit_text("❌ Task Cancelled successfully!")
+        else:
+            await status_msg.edit_text(f"❌ Download failed: {str(e)}")
+    finally:
+        if filename and os.path.exists(filename):
+            try:
+                os.remove(filename)
+            except:
+                pass
+        if thumb_path and "thumbnails/auto_" in thumb_path and os.path.exists(thumb_path):
+            try:
+                os.remove(thumb_path)
+            except:
+                pass
+        if f"yt_{user_id}" in USER_THUMBNAILS:
+            try:
+                os.remove(USER_THUMBNAILS[f"yt_{user_id}"])
+                del USER_THUMBNAILS[f"yt_{user_id}"]
+            except:
+                pass
+        CANCEL_REQUESTS.discard(user_id)
+
+if __name__ == "__main__":
+    print("🤖 OTT Bot is running... Press Ctrl+C to stop.")
+    app.run()
