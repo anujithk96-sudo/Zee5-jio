@@ -1,3 +1,4 @@
+import logging
 import os
 import time
 import asyncio
@@ -8,10 +9,6 @@ import html
 import subprocess
 import uuid
 from datetime import datetime
-from hachoir.metadata import extractMetadata
-from hachoir.parser import createParser
-from pyrogram import Client, filters
-from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 from dotenv import load_dotenv
 
 load_dotenv()
