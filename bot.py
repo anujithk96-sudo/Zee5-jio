@@ -64,7 +64,7 @@ def get_progress_hook(client, message):
 async def start_command(client, message):
     await message.reply_text(
         "👋 Hello! Welcome to Zee5 Audio Downloader Bot.\n\n"
-        "Send any Zee5 link, and you can download it directly as MP3 Audio!"
+        "Send any Zee5 link,1 and you can download it directly as MP3 Audio!"
     )
 
 # Zee5 ലിങ്കുകൾ തിരിച്ചറിയുന്ന ഹാൻഡ്‌ലർ
@@ -85,7 +85,7 @@ async def get_link(client, message):
         await message.reply_text("❌ Please send a valid Zee5 link (e.g., https://www.zee5.com/...).")
 
 # ഡൗൺലോഡ് പ്രോസസ്സ് ഹാൻഡ്‌ലർ
-@app.on_callback_query(filters.regex("^dl\|"))
+@app.on_callback_query(filters.regex(r"^dl\|"))
 async def download_media(client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
     url = USER_URLS.get(user_id)
@@ -94,7 +94,7 @@ async def download_media(client, callback_query: CallbackQuery):
         await callback_query.message.edit_text("❌ Link expired. Please send the link again.")
         return
 
-    status_msg = await callback_code_msg = await callback_query.message.edit_text("🎵 Extracting and converting to MP3 audio... Please wait...")
+    status_msg = await callback_query.message.edit_text("🎵 Extracting and converting to MP3 audio... Please wait...")
     
     ydl_opts = {
         'format': 'bestaudio/best',
