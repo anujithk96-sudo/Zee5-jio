@@ -318,7 +318,6 @@ async def handle_user_inputs(client, message):
     url_match = re.search(r'https?://[^\s]+', text)
     extracted_url = url_match.group(0) if url_match else text
 
-    # സീഫൈവ് (ZEE5) അല്ലെങ്കിൽ ജിയോഹോട്ട്സ്റ്റാർ ലിങ്കുകൾ ഓട്ടോമാറ്റായി തിരിച്ചറിയുന്നു
     if any(p in extracted_url for p in ["hotstar.com", "jiocinema.com", "jiohotstar.com", "zee5.com"]):
         parts = text.split("-n")
         url = url_match.group(0) if url_match else parts[0].strip()
@@ -328,7 +327,6 @@ async def handle_user_inputs(client, message):
         
         status_msg = await message.reply_text("⏳ Fetching video info & original thumbnail... Please wait!")
 
-        # ലിങ്കിന് അനുയോജ്യമായ കുക്കീസ് ഫയൽ ഓട്ടോമാറ്റായി തിരഞ്ഞെടുക്കുന്നു
         if "zee5.com" in extracted_url:
             cookie_file_path = "zee5_cookies.txt" if os.path.exists("zee5_cookies.txt") else None
         else:
@@ -392,7 +390,7 @@ async def handle_user_inputs(client, message):
 
         except Exception as e:
             logging.exception("Info extraction error: %s", e)
-            await status_msg.edit_text(f"❌ Could not fetch video info.\n\nReason: <code>{html.escape(str(e)[:500])}</code>", parse_mode="html")
+            await status_msg.edit_text(f"❌ Could not fetch video info.\n\nReason: <code>{html.escape(str(e)[:500])}</code>", parse_mode="HTML")
     else:
         await message.reply_text("❌ Please send a valid OTT link or use /rip command.")
 
@@ -471,7 +469,6 @@ async def download_final_media(client, callback_query: CallbackQuery):
         'progress_hooks': [get_progress_hook(client, status_msg, user_id, f"Downloading {quality}p Video")],
     }
 
-    # ഡൗൺലോഡ് ചെയ്യുമ്പോഴും സീഫൈവ് ലിങ്ക് ആണെങ്കിൽ `zee5_cookies.txt` ഉപയോഗിക്കുന്നു
     if "zee5.com" in url and os.path.exists("zee5_cookies.txt"):
         ydl_opts['cookiefile'] = "zee5_cookies.txt"
     elif os.path.exists("cookies.txt"):
@@ -483,7 +480,7 @@ async def download_final_media(client, callback_query: CallbackQuery):
         os.makedirs("downloads", exist_ok=True)
         def run_download():
             with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-                if user_id in CANCEL_READ_REQUESTS if 'CANCEL_READ_REQUESTS' in globals() else user_id in CANCEL_REQUESTS:
+                if user_id in CANCEL_REQUESTS:
                     raise Exception("Task cancelled by user.")
                 info = ydl.extract_info(url, download=True)
                 return ydl.prepare_filename(info)
