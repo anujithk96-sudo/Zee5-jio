@@ -318,7 +318,6 @@ async def handle_user_inputs(client, message):
     url_match = re.search(r'https?://[^\s]+', text)
     extracted_url = url_match.group(0) if url_match else text
 
-    # ജിയോഹോട്ട്സ്റ്റാർ, സീഫൈവ് (ഉദാഹരണത്തിന്: https://www.zee5.com/tv-shows/details/...) ലിങ്കുകൾ ഓട്ടോമാറ്റായി തിരിച്ചറിയുന്നു
     if any(p in extracted_url for p in ["hotstar.com", "jiocinema.com", "jiohotstar.com", "zee5.com"]):
         parts = text.split("-n")
         url = url_match.group(0) if url_match else parts[0].strip()
@@ -328,7 +327,6 @@ async def handle_user_inputs(client, message):
         
         status_msg = await message.reply_text("⏳ Fetching video info & original thumbnail... Please wait!")
 
-        # സീഫൈവ് ലിങ്ക് ആണെങ്കിൽ zee5_cookies.txt അല്ലെങ്കിൽ cookies.txt ഉപയോഗിക്കുന്നു
         if "zee5.com" in extracted_url:
             cookie_file_path = "zee5_cookies.txt" if os.path.exists("zee5_cookies.txt") else None
         else:
@@ -341,7 +339,9 @@ async def handle_user_inputs(client, message):
                 'skip_download': True,
                 'noplaylist': True,
                 'cookiefile': cookie_file_path,
-                'nocheckcertificate': True
+                'nocheckcertificate': True,
+                'ignoreerrors': True,
+                'extractor_args': {'zee5': {'all_formats': True}}
             }
 
             def extract_info_fast():
@@ -349,6 +349,9 @@ async def handle_user_inputs(client, message):
                     return ydl.extract_info(url, download=False)
 
             info = await asyncio.to_thread(extract_info_fast)
+            if not info:
+                raise Exception("Failed to extract info or video is protected/unavailable.")
+
             title = info.get('title', 'OTT Video')
             thumbnail_url = info.get('thumbnail')
             if not thumbnail_url and 'thumbnails' in info:
