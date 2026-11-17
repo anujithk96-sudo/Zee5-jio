@@ -43,7 +43,7 @@ app = Client(
 )
 
 # ലൈവ് പ്രോഗ്രസ് ബാർ ഹുക്ക്
-def get_progress_hook(client, message):
+def get_progress_hook(client, message, media_type="Audio"):
     last_update_time = 0
     def progress_hook(d):
         nonlocal last_update_time
@@ -56,7 +56,7 @@ def get_progress_hook(client, message):
                 try:
                     asyncio.run_coroutine_threadsafe(
                         message.edit_text(
-                            f"📥 Downloading Audio...\n\n"
+                            f"📥 Downloading {media_type}...\n\n"
                             f"📊 Percentage: {percentage}\n"
                             f"🚀 Speed: {speed}\n"
                             f"⏱️ ETA: {eta}"
@@ -72,11 +72,11 @@ def get_progress_hook(client, message):
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     await message.reply_text(
-        "👋 Hello! Welcome to Zee5 Audio Downloader Bot.\n\n"
-        "Send any Zee5 link (including onelink.me links), and you can download it directly as MP3 Audio!"
+        "👋 Hello! Welcome to Zee5 Downloader Bot.\n\n"
+        "Send any Zee5 link (including onelink.me links), and download it as MP3 Audio or MP4 Video!"
     )
 
-# Zee5 ലിങ്കുകൾ തിരിച്ചറിഞ്ഞ് പ്രോസസ്സ് ചെയ്യുന്ന ഹാൻഡ്‌ലർ (onelink സപ്പോർട്ട് ഉൾപ്പെടെ)
+# Zee5 ലിങ്കുകൾ തിരിച്ചറിഞ്ഞ് പ്രോസസ്സ് ചെയ്യുന്ന ഹാൻഡ്‌ലർ
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
 async def get_link(client, message):
     w = message.text.strip()
@@ -110,7 +110,6 @@ async def get_link(client, message):
                 else:
                     url = "https://" + li["url"] + g2 + req1["video_token"]
             else:
-                # ജനറൽ ഫാൾബാക്ക്
                 r2 = requests.get(li["token"] + "-".join(rgx), headers=headers, params={"translation": "en", "country": "IN"}).json()
                 g2 = (r2["hls"][0].replace("drm", "hls"))
                 url = "https://" + li["url"] + g2 + req1["video_token"]
@@ -118,9 +117,12 @@ async def get_link(client, message):
             USER_URLS[user_id] = url
             
             keyboard = InlineKeyboardMarkup([
-                [InlineKeyboardButton("🎵 Download MP3 Audio", callback_data="dl|audio|mp3")]
+                [
+                    InlineKeyboardButton("🎵 Download MP3 Audio", callback_data="dl|audio|mp3"),
+                    InlineKeyboardButton("🎬 Download MP4 Video", callback_data="dl|video|mp4")
+                ]
             ])
-            await status_msg.edit_text("📥 Zee5 link successfully processed! Click below to download MP3 Audio:", reply_markup=keyboard)
+            await status_msg.edit_text("📥 Zee5 link successfully processed! Choose your format below:", reply_markup=keyboard)
 
         except Exception as e:
             logger.error(f"Zee5 extraction error: {e}")
@@ -128,7 +130,7 @@ async def get_link(client, message):
     else:
         await message.reply_text("❌ Please send a valid Zee5 link (or onelink.me link).")
 
-# ഡൗൺലോഡ് പ്രോസസ്സ് ഹാൻഡ്‌ലർ
+# ഡൗൺലോഡ് പ്രോസസ്സ് ഹാൻഡ്‌ലർ (MP3 & MP4)
 @app.on_callback_query(filters.regex(r"^dl\|"))
 async def download_media(client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
@@ -138,22 +140,37 @@ async def download_media(client, callback_query: CallbackQuery):
         await callback_query.message.edit_text("❌ Link expired. Please send the link again.")
         return
 
-    status_msg = await callback_query.message.edit_text("🎵 Downloading and converting to MP3 audio... Please wait...")
-    
-    ydl_opts = {
-        'format': 'bestaudio/best',
-        'outtmpl': 'downloads/%(title)s.%(ext)s',
-        'postprocessors': [{
-            'key': 'FFmpegExtractAudio',
-            'preferredcodec': 'mp3',
-            'preferredquality': '192',
-        }],
-        'progress_hooks': [get_progress_hook(client, status_msg)],
-        'nocheckcertificate': True,
-        'ignoreerrors': False,
-        'no_warnings': True,
-        'http_headers': headers
-    }
+    cb_data = callback_query.data
+    _, media_type, ext = cb_data.split("|")
+
+    if media_type == "audio":
+        status_msg = await callback_query.message.edit_text("🎵 Downloading and converting to MP3 audio... Please wait...")
+        ydl_opts = {
+            'format': 'bestaudio/best',
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'postprocessors': [{
+                'key': 'FFmpegExtractAudio',
+                'preferredcodec': 'mp3',
+                'preferredquality': '192',
+            }],
+            'progress_hooks': [get_progress_hook(client, status_msg, "Audio")],
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+            'no_warnings': True,
+            'http_headers': headers
+        }
+    else:
+        status_msg = await callback_query.message.edit_text("🎬 Downloading MP4 video... Please wait...")
+        ydl_opts = {
+            'format': 'bestvideo+bestaudio/best',
+            'outtmpl': 'downloads/%(title)s.%(ext)s',
+            'merge_output_format': 'mp4',
+            'progress_hooks': [get_progress_hook(client, status_msg, "Video")],
+            'nocheckcertificate': True,
+            'ignoreerrors': False,
+            'no_warnings': True,
+            'http_headers': headers
+        }
 
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = "cookies.txt"
@@ -169,19 +186,29 @@ async def download_media(client, callback_query: CallbackQuery):
                 return ydl.prepare_filename(info)
 
         filename = await asyncio.to_thread(run_dl)
-        if filename:
+        if filename and media_type == "audio":
             filename = os.path.splitext(filename)[0] + ".mp3"
+        elif filename and media_type == "video":
+            filename = os.path.splitext(filename)[0] + ".mp4"
 
         if not filename or not os.path.exists(filename):
-            raise Exception("Audio file could not be generated.")
+            raise Exception("Media file could not be generated.")
 
-        await status_msg.edit_text("📤 Uploading MP3 to Telegram...")
+        await status_msg.edit_text(f"📤 Uploading {ext.upper()} to Telegram...")
 
-        await client.send_audio(
-            chat_id=callback_query.message.chat.id,
-            audio=filename,
-            caption="🎵 Here is your Zee5 MP3 Audio!"
-        )
+        if media_type == "audio":
+            await client.send_audio(
+                chat_id=callback_query.message.chat.id,
+                audio=filename,
+                caption="🎵 Here is your Zee5 MP3 Audio!"
+            )
+        else:
+            await client.send_video(
+                chat_id=callback_query.message.chat.id,
+                video=filename,
+                caption="🎬 Here is your Zee5 MP4 Video!",
+                supports_streaming=True
+            )
 
         await status_msg.delete()
         
@@ -195,5 +222,5 @@ async def download_media(client, callback_query: CallbackQuery):
                 pass
 
 if __name__ == "__main__":
-    print("Zee5 Audio Bot is running...")
+    print("Zee5 Bot is running...")
     app.run()
