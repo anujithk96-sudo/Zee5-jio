@@ -158,7 +158,7 @@ async def start(client, message):
         "/rip <platform> <url> — Start a download\n"
         "/status — View active downloads\n"
         "/platforms — List all supported platforms\n"
-        "/help — Full help"
+        "/help — Full 1 help"
     )
     await message.reply_text(text)
 
