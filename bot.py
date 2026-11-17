@@ -27,7 +27,7 @@ asyncio.set_event_loop(loop)
 
 # Pyrogram ക്라이언트 initialization
 app = Client(
-    "jiohotstar_bot",
+    "zee5_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
@@ -59,22 +59,22 @@ def get_progress_hook(client, message):
                 last_update_time = current_time
     return progress_hook
 
-# /start കമാൻഡ് (ഇംഗ്ലീഷിലുള്ള വെൽക്കം മെസ്സേജ്)
+# /start കമാൻഡ്
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     await message.reply_text(
-        "👋 Hello! Welcome to JioHotstar Downloader Bot.\n\n"
-        "Send any JioHotstar link, and you can download it as MP3 Audio or Video!"
+        "👋 Hello! Welcome to Zee5 Downloader Bot.\n\n"
+        "Send any Zee5 link (e.g., https://www.zee5.com/... ), and you can download it as MP3 Audio or Video!"
     )
 
-# https ലിങ്കുകൾ ഉൾപ്പെടെയുള്ള ഹോസ്റ്റാർ ലിങ്കുകൾ ഓട്ടോമാറ്റിക്കായി തിരിച്ചറിയുന്ന ഹാൻഡ്‌ലർ
+# Zee5 ലിങ്കുകൾ മാത്രം ഓട്ടോമാറ്റിക്കായി തിരിച്ചറിയുന്ന ഹാൻഡ്‌ലർ
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
 async def get_link(client, message):
     url = message.text.strip()
     user_id = message.from_user.id
 
-    # ലിങ്കിൽ hotstar.com ഉണ്ടോ എന്ന് പരിശോധിക്കുന്നു
-    if "hotstar.com" in url:
+    # ലിങ്കിൽ zee5.com ഉണ്ടോ എന്ന് പരിശോധിക്കുന്നു
+    if "zee5.com" in url:
         USER_URLS[user_id] = url
         keyboard = InlineKeyboardMarkup([
             [
@@ -85,9 +85,9 @@ async def get_link(client, message):
                 InlineKeyboardButton("📹 480p Video", callback_data="dl|video|480")
             ]
         ])
-        await message.reply_text("📥 JioHotstar link detected! Please select your required format:", reply_markup=keyboard)
+        await message.reply_text("📥 Zee5 link detected! Please select your required format:", reply_markup=keyboard)
     else:
-        await message.reply_text("❌ Please send a valid JioHotstar link.")
+        await message.reply_text("❌ Please send a valid Zee5 link (e.g., https://www.zee5.com/...).")
 
 # ഡൗൺലോഡ് പ്രോസസ്സ് ഹാൻഡ്‌ലർ
 @app.on_callback_query(filters.regex("^dl\|"))
@@ -114,6 +114,7 @@ async def download_media(client, callback_query: CallbackQuery):
                 'preferredquality': '192',
             }],
             'progress_hooks': [get_progress_hook(client, status_msg)],
+            'nocheckcertificate': True,
         }
     else:
         status_msg = await callback_query.message.edit_text(f"📥 Downloading {quality}p video... Please wait...")
@@ -121,9 +122,10 @@ async def download_media(client, callback_query: CallbackQuery):
             'format': f'bestvideo[height<={quality}]+bestaudio/best[height<={quality}]/best',
             'outtmpl': 'downloads/%(title)s.%(ext)s',
             'progress_hooks': [get_progress_hook(client, status_msg)],
+            'nocheckcertificate': True,
         }
 
-    # cookies.txt ഫയൽ ഉണ്ടെങ്കിൽ ഉപയോഗിക്കുന്നു
+    # cookies.txt മാത്രം ഉപയോഗിക്കുന്നു
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = "cookies.txt"
 
@@ -142,13 +144,13 @@ async def download_media(client, callback_query: CallbackQuery):
             await client.send_audio(
                 chat_id=callback_query.message.chat.id,
                 audio=filename,
-                caption="🎵 Here is your JioHotstar MP3 Audio!"
+                caption="🎵 Here is your Zee5 MP3 Audio!"
             )
         else:
             await client.send_video(
                 chat_id=callback_query.message.chat.id,
                 video=filename,
-                caption=f"📹 Here is your JioHotstar Video ({quality}p)!"
+                caption=f"📹 Here is your Zee5 Video ({quality}p)!"
             )
 
         await status_msg.delete()
@@ -161,5 +163,5 @@ async def download_media(client, callback_query: CallbackQuery):
         await status_msg.edit_text(f"❌ Download failed: {str(e)}")
 
 if __name__ == "__main__":
-    print("Bot is running...")
+    print("Zee5 Bot is running...")
     app.run()
