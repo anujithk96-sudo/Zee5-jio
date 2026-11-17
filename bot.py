@@ -2,9 +2,6 @@ import logging
 import os
 import time
 import asyncio
-import re
-import json
-import requests
 import yt_dlp
 from pyrogram import Client, filters
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
@@ -18,32 +15,18 @@ API_ID = os.environ.get("API_ID")
 API_HASH = os.environ.get("API_HASH")
 BOT_TOKEN = os.environ.get("BOT_TOKEN")
 
-# വലിയ URL-കൾ സേവ് ചെയ്തു വെക്കാനുള്ള ഡിക്ഷണറി
 USER_URLS = {}
-
-# Zee5 ഹെഡേഴ്സ് (Headers)
-headers = {
-    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
-    "Accept-Language": "en-US,en;q=0.9",
-}
-
-# ഇവന്റ് ലൂപ്പ് സെറ്റ് ചെയ്യുന്നു
-try:
-    loop = asyncio.get_event_loop()
-except RuntimeError:
-    loop = asyncio.new_event_loop()
-asyncio.set_event_loop(loop)
 
 # Pyrogram ക്라이언트 initialization
 app = Client(
-    "zee5_bot",
+    "prime_bot",
     api_id=API_ID,
     api_hash=API_HASH,
     bot_token=BOT_TOKEN
 )
 
-# ലൈവ് പ്രോഗ്രസ് ബാർ ഹുക്ക്
-def get_progress_hook(client, message, media_type="Audio"):
+# പ്രോഗ്രസ് ബാർ ഹുക്ക്
+def get_progress_hook(client, message, media_type="Video"):
     last_update_time = 0
     def progress_hook(d):
         nonlocal last_update_time
@@ -68,69 +51,30 @@ def get_progress_hook(client, message, media_type="Audio"):
                 last_update_time = current_time
     return progress_hook
 
-# /start കമാൻഡ്
 @app.on_message(filters.command("start") & filters.private)
 async def start_command(client, message):
     await message.reply_text(
-        "👋 Hello! Welcome to Zee5 Downloader Bot.\n\n"
-        "Send any Zee5 link (including onelink.me links), and download it as MP3 Audio or MP4 Video!"
+        "👋 Hello! Welcome to Prime Video Downloader Bot.\n\n"
+        "Send any Amazon Prime Video link, and download it as MP3 Audio or MP4 Video using cookies.txt!"
     )
 
-# Zee5 ലിങ്കുകൾ തിരിച്ചറിഞ്ഞ് പ്രോസസ്സ് ചെയ്യുന്ന ഹാൻഡ്‌ലർ
 @app.on_message(filters.text & filters.private & ~filters.command("start"))
 async def get_link(client, message):
-    w = message.text.strip()
+    url = message.text.strip()
     user_id = message.from_user.id
 
-    if "zee5.com" in w or "onelink.me" in w:
-        status_msg = await message.reply_text("⏳ Processing Zee5 link & extracting stream info...")
-        try:
-            # onelink ഷോർട്ട് ലിങ്ക് ആണെങ്കിൽ ഒറിജിനൽ യുആർഎൽ ലേക്ക് എക്സ്പാൻഡ് ചെയ്യുക
-            if "onelink.me" in w:
-                session = requests.Session()
-                response = session.get(w, headers=headers, allow_redirects=True, timeout=10)
-                w = response.url
-
-            req1 = requests.get("https://useraction.zee5.com/tokennd").json()
-            rgx = re.findall(r"([0-9]?\w+)", w)[-3:]
-            li = {"url": "zee5vodnd.akamaized.net", "token": "https://gwapi.zee5.com/content/details/"}
-            req2 = requests.get("https://useraction.zee5.com/token/platform_tokens.php?platform_name=web_app").json()["token"]
-            headers["X-Access-Token"] = req2
-            req3 = requests.get("https://useraction.zee5.com/token").json()
-
-            if "movies" in w:
-                r1 = requests.get(li["token"] + "-".join(rgx), headers=headers, params={"translation": "en", "country": "IN"}).json()
-                g1 = (r1["hls"][0].replace("drm", "hls") + req1["video_token"])
-                url = "https://" + li["url"] + g1
-            elif "tvshows" in w or "originals" in w:
-                r2 = requests.get(li["token"] + "-".join(rgx), headers=headers, params={"translation": "en", "country": "IN"}).json()
-                g2 = (r2["hls"][0].replace("drm", "hls"))
-                if "netst" in g2:
-                    url = g2 + req3["video_token"]
-                else:
-                    url = "https://" + li["url"] + g2 + req1["video_token"]
-            else:
-                r2 = requests.get(li["token"] + "-".join(rgx), headers=headers, params={"translation": "en", "country": "IN"}).json()
-                g2 = (r2["hls"][0].replace("drm", "hls"))
-                url = "https://" + li["url"] + g2 + req1["video_token"]
-
-            USER_URLS[user_id] = url
-            
-            keyboard = InlineKeyboardMarkup([
-                [
-                    InlineKeyboardButton("🎵 Download MP3 Audio", callback_data="dl|audio|mp3"),
-                    InlineKeyboardButton("🎬 Download MP4 Video", callback_data="dl|video|mp4")
-                ]
-            ])
-            await status_msg.edit_text("📥 Zee5 link successfully processed! Choose your format below:", reply_markup=keyboard)
-
-        except Exception as e:
-            logger.error(f"Zee5 extraction error: {e}")
-            await status_msg.edit_text("❌ There's some issue resolving this link. Make sure it points to a valid Zee5 media page 😕")
+    if "primevideo.com" in url or "amazon.com" in url:
+        USER_URLS[user_id] = url
+        keyboard = InlineKeyboardMarkup([
+            [
+                InlineKeyboardButton("🎵 Download MP3 Audio", callback_data="dl|audio|mp3"),
+                InlineKeyboardButton("🎬 Download MP4 Video", callback_data="dl|video|mp4")
+            ]
+        ])
+        await message.reply_text("📥 Prime Video link detected! Choose your format below:", reply_markup=keyboard)
     else:
-        await message.reply_text("❌ Please send a valid Zee5 link (or onelink.me link).")
+        await message.reply_text("❌ Please send a valid Amazon Prime Video link.")
 
-# ഡൗൺലോഡ് പ്രോസസ്സ് ഹാൻഡ്‌ലർ (MP3 & MP4)
 @app.on_callback_query(filters.regex(r"^dl\|"))
 async def download_media(client, callback_query: CallbackQuery):
     user_id = callback_query.from_user.id
@@ -157,7 +101,6 @@ async def download_media(client, callback_query: CallbackQuery):
             'nocheckcertificate': True,
             'ignoreerrors': False,
             'no_warnings': True,
-            'http_headers': headers
         }
     else:
         status_msg = await callback_query.message.edit_text("🎬 Downloading MP4 video... Please wait...")
@@ -169,9 +112,9 @@ async def download_media(client, callback_query: CallbackQuery):
             'nocheckcertificate': True,
             'ignoreerrors': False,
             'no_warnings': True,
-            'http_headers': headers
         }
 
+    # cookies.txt ഫയൽ ഉപയോഗിക്കുന്നു
     if os.path.exists("cookies.txt"):
         ydl_opts['cookiefile'] = "cookies.txt"
 
@@ -200,13 +143,13 @@ async def download_media(client, callback_query: CallbackQuery):
             await client.send_audio(
                 chat_id=callback_query.message.chat.id,
                 audio=filename,
-                caption="🎵 Here is your Zee5 MP3 Audio!"
+                caption="🎵 Here is your Prime Video MP3 Audio!"
             )
         else:
             await client.send_video(
                 chat_id=callback_query.message.chat.id,
                 video=filename,
-                caption="🎬 Here is your Zee5 MP4 Video!",
+                caption="🎬 Here is your Prime Video MP4 Video!",
                 supports_streaming=True
             )
 
@@ -222,5 +165,5 @@ async def download_media(client, callback_query: CallbackQuery):
                 pass
 
 if __name__ == "__main__":
-    print("Zee5 Bot is running...")
+    print("Prime Video Bot is running...")
     app.run()
