@@ -94,7 +94,7 @@ async def download_media(client, callback_query: CallbackQuery):
         await callback_query.message.edit_text("❌ Link expired. Please send the link again.")
         return
 
-    status_msg = await callback_query.message.edit_text("🎵 Extracting and converting to MP3 audio... Please wait...")
+    status_msg = await callback_code_msg = await callback_query.message.edit_text("🎵 Extracting and converting to MP3 audio... Please wait...")
     
     ydl_opts = {
         'format': 'bestaudio/best',
@@ -106,8 +106,13 @@ async def download_media(client, callback_query: CallbackQuery):
         }],
         'progress_hooks': [get_progress_hook(client, status_msg)],
         'nocheckcertificate': True,
-        'ignoreerrors': True,
+        'ignoreerrors': False,
         'no_warnings': True,
+        'extractor_args': {'zee5': {'all_formats': True}},
+        'http_headers': {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+            'Accept-Language': 'en-US,en;q=0.9',
+        }
     }
 
     if os.path.exists("cookies.txt"):
