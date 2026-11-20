@@ -41,6 +41,11 @@ PLATFORMS = {
 ALL_PLATFORMS = [p for group in PLATFORMS.values() for p in group]
 QUALITIES = ["4K", "1080p", "720p", "480p"]
 
+ANSI_ESCAPE_RE = re.compile(r"\x1b\[[0-9;]*m")
+
+def clean_ansi(text_val) -> str:
+    return ANSI_ESCAPE_RE.sub("", str(text_val or "")).strip()
+
 def is_allowed(user_id: int) -> bool:
     return not ALLOWED_IDS or user_id in ALLOWED_IDS
 
@@ -105,10 +110,10 @@ def generate_thumbnail(video_path, user_id):
 
 def get_progress_bar(percentage):
     try:
-        pct = float(percentage.replace('%', '').strip())
+        pct = float(clean_ansi(percentage).replace('%', '').strip())
     except:
         pct = 0.0
-    completed = int(pct // 10)
+    completed = max(0, min(10, int(pct // 10)))
     remaining = 10 - completed
     return "█" * completed + "░" * remaining
 
@@ -121,9 +126,9 @@ def get_progress_hook(client, message, user_id, title="Downloading"):
         if d['status'] == 'downloading':
             current_time = time.time()
             if current_time - last_update_time > 3:
-                percentage = d.get('_percent_str', '0%').strip()
-                speed = d.get('_speed_str', 'N/A').strip()
-                eta = d.get('_eta_str', 'N/A').strip()
+                percentage = clean_ansi(d.get('_percent_str', '0%'))
+                speed = clean_ansi(d.get('_speed_str', 'N/A'))
+                eta = clean_ansi(d.get('_eta_str', 'N/A'))
                 bar = get_progress_bar(percentage)
                 cancel_keyboard = InlineKeyboardMarkup([
                     [InlineKeyboardButton("✖️ Cancel Task", callback_data=f"cancel_dl_{user_id}")]
@@ -350,7 +355,7 @@ async def handle_user_inputs(client, message):
                     return ydl.extract_info(url, download=False)
 
             info = await asyncio.to_thread(extract_info_fast)
-            title = info.get('title', 'OTT Video')
+            title = html.escape(str(info.get('title') or 'OTT Video'))
             thumbnail_url = info.get('thumbnail')
             if not thumbnail_url and 'thumbnails' in info:
                 thumbnails = info.get('thumbnails', [])
