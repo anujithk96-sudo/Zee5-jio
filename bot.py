@@ -13,6 +13,7 @@ from dotenv import load_dotenv
 from hachoir.metadata import extractMetadata
 from hachoir.parser import createParser
 from pyrogram import Client, filters
+from pyrogram.enums import ParseMode
 from pyrogram.types import InlineKeyboardMarkup, InlineKeyboardButton, CallbackQuery
 
 load_dotenv()
@@ -388,17 +389,17 @@ async def handle_user_inputs(client, message):
 
             if thumbnail_url:
                 try:
-                    await message.reply_photo(photo=thumbnail_url, caption=caption_text, reply_markup=keyboard)
+                    await message.reply_photo(photo=thumbnail_url, caption=caption_text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
                     await status_msg.delete()
                     return
                 except Exception:
                     pass
 
-            await status_msg.edit_text(caption_text, reply_markup=keyboard)
+            await status_msg.edit_text(caption_text, reply_markup=keyboard, parse_mode=ParseMode.HTML)
 
         except Exception as e:
             logging.exception("Info extraction error: %s", e)
-            await status_msg.edit_text(f"❌ Could not fetch video info.\n\nReason: <code>{html.escape(str(e)[:500])}</code>", parse_mode="html")
+            await status_msg.edit_text(f"❌ Could not fetch video info.\n\nReason: <code>{html.escape(str(e)[:500])}</code>", parse_mode=ParseMode.HTML)
     else:
         await message.reply_text("❌ Please send a valid OTT link or use /rip command.")
 
