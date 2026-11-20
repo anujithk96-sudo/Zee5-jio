@@ -110,23 +110,37 @@ def build_auto_filename(info: dict, url: str, season: int, episode: int, quality
     return f"{series_clean}_{quality}p_{audio.upper()}{ext}"
 
 
-def parse_batch_spec(text: str):
+def extract_batch_and_clean_url(raw_url: str, full_text: str):
     """
-    Supports formats at end of message:
-      /1-1      -> season 1, episodes [1]
-      /1-1-5    -> season 1, episodes [1, 2, 3, 4, 5]
-    Returns (season, episodes_list) or (None, [None]) for single link.
+    Handles both:
+      - <url> /1-1-5
+      - <url>/1-100 or <url>/1-1100-1101
+    Returns (clean_url, season, episodes_list)
     """
-    match = re.search(r"(?:^|\s)/(\d+)-(\d+)(?:-(\d+))?\s*$", text)
-    if not match:
-        return None, [None]
-    season = int(match.group(1))
-    start_ep = int(match.group(2))
-    end_ep = int(match.group(3)) if match.group(3) else start_ep
-    if end_ep < start_ep:
-        start_ep, end_ep = end_ep, start_ep
-    episodes = list(range(start_ep, end_ep + 1))
-    return season, episodes
+    season, episodes = None, [None]
+    m_cmd = re.search(r"(?:^|\s)/(\d+)-(\d+)(?:-(\d+))?\s*$", full_text)
+    if m_cmd:
+        season = int(m_cmd.group(1))
+        s_ep = int(m_cmd.group(2))
+        e_ep = int(m_cmd.group(3)) if m_cmd.group(3) else s_ep
+        if e_ep < s_ep:
+            s_ep, e_ep = e_ep, s_ep
+        episodes = list(range(s_ep, e_ep + 1))
+        clean_url = re.sub(r"/(\d+)-(\d+)(?:-(\d+))?\s*$", "", raw_url)
+        return clean_url, season, episodes
+
+    m_path = re.search(r"/(\d+)-(\d+)(?:-(\d+))?/?$", raw_url)
+    if m_path:
+        season = int(m_path.group(1))
+        s_ep = int(m_path.group(2))
+        e_ep = int(m_path.group(3)) if m_path.group(3) else s_ep
+        if e_ep < s_ep:
+            s_ep, e_ep = e_ep, s_ep
+        episodes = list(range(s_ep, e_ep + 1))
+        clean_url = re.sub(r"/(\d+)-(\d+)(?:-(\d+))?/?$", "", raw_url)
+        return clean_url, season, episodes
+
+    return raw_url, season, episodes
 
 
 def get_video_duration(file_path):
@@ -390,12 +404,12 @@ async def run_rip_download(job_id, platform, url, quality, status_msg, user_id):
                 f"✅ Download complete!\n🆔 Job {job_id} finished successfully."
             )
         else:
-            err = stderr.decode(errors="ignore")[-300:] if stderr else "Unknown error"
+            err = clean_ansi(stderr.decode(errors="ignore"))[-300:] if stderr else "Unknown error"
             await status_msg.edit_text(
                 f"❌ Download failed!\n🆔 Job {job_id}\n\nError:\n{err}"
             )
     except Exception as e:
-        await status_msg.edit_text(f"💥 Unexpected error in job {job_id}:\n{str(e)}")
+        await status_msg.edit_text(f"💥 Unexpected error in job {job_id}:\n{clean_ansi(e)}")
     finally:
         active_downloads.pop(job_id, None)
 
@@ -491,10 +505,10 @@ async def handle_user_inputs(client, message):
         p in extracted_url.lower()
         for p in ["hotstar.com", "jiocinema.com", "jiohotstar.com", "sunnxt.com", "zee5.com"]
     ):
-        season, episodes = parse_batch_spec(text)
         text_without_batch = re.sub(r"(?:^|\s)/\d+-\d+(?:-\d+)?\s*$", "", text).strip()
         parts = text_without_batch.split("-n", 1)
-        url = url_match.group(0) if url_match else parts[0].strip()
+        raw_url = url_match.group(0) if url_match else parts[0].strip()
+        url, season, episodes = extract_batch_and_clean_url(raw_url, text)
         custom_name = parts[1].strip() if len(parts) > 1 and parts[1].strip() else None
 
         USER_URLS[user_id] = {
@@ -641,7 +655,7 @@ async def handle_user_inputs(client, message):
             reason = (
                 "Metadata lookup timed out."
                 if isinstance(e, asyncio.TimeoutError)
-                else str(e)
+                else clean_ansi(e)
             )
             await status_msg.edit_text(
                 f"❌ Could not fetch video info.\n\nReason: <code>{html.escape(reason[:500])}</code>",
@@ -774,7 +788,6 @@ async def download_final_media(client, callback_query: CallbackQuery):
             if cookie_file_path:
                 ydl_opts["cookiefile"] = cookie_file_path
 
-            # If season/episode batch is specified, pass playlist_items if supported by extractor
             if ep_num is not None:
                 ydl_opts["playlist_items"] = str(ep_num)
 
@@ -880,7 +893,7 @@ async def download_final_media(client, callback_query: CallbackQuery):
         if user_id in CANCEL_REQUESTS or "cancelled" in str(e).lower():
             await status_msg.edit_text("❌ Task Cancelled successfully!")
         else:
-            await status_msg.edit_text(f"❌ Download failed: {str(e)}")
+            await status_msg.edit_text(f"❌ Download failed: {clean_ansi(e)}")
     finally:
         CANCEL_REQUESTS.discard(user_id)
 
